@@ -1,0 +1,8 @@
+# .gitignore
+__pycache__/
+.venv/
+venv/
+.env
+*.pyc
+data/
+*.parquet
