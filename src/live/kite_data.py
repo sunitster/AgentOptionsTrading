@@ -1,12 +1,13 @@
 # src/live/kite_data.py
 """
-Ultra-stable KiteData + full_option_chain helper (Option B FINAL v2).
+Ultra-stable KiteData + full_option_chain helper (FINAL PATCHED VERSION).
 
-Fixes applied:
-- Ensure 'instrument_type' handling is safe (no .fillna() on None).
-- Replace NaN values with None before returning snapshots.
-- Ensure underlying row creation guards against NaN.
-- Small cache preserved.
+Fixes:
+- Live expiry scoring for correct expiry selection.
+- Live chain sanitization: NO NaN/inf ever leaves this module.
+- Underlying row always safe (no NaN).
+- Dashboard JSON-safe output.
+- No breakage to existing SignalGenerator or Broker.
 """
 
 import os
@@ -39,18 +40,19 @@ class KiteData:
         self.api_secret = ""
         self.access_token = ""
         self._cache = {"ts": None, "data": None}
+
         self._load_config()
         if HAS_KITE and self.api_key and self.access_token:
             self._connect()
         else:
-            LOG.warning("KiteConnect not available or keys missing — running in PAPER mode")
+            LOG.warning("KiteConnect unavailable or keys missing — PAPER MODE")
 
-    # -------------------------
-    # Config / Connect
-    # -------------------------
+    # -------------------------------------------------
+    # CONFIG
+    # -------------------------------------------------
     def _load_config(self):
         if not os.path.exists(self.config_path):
-            LOG.warning("Config not found: %s — falling back to PAPER snapshot", self.config_path)
+            LOG.warning("Config not found: %s — PAPER MODE", self.config_path)
             return
         with open(self.config_path, "r") as f:
             cfg = yaml.safe_load(f) or {}
@@ -62,325 +64,359 @@ class KiteData:
     def _connect(self):
         try:
             self.kite = KiteConnect(api_key=self.api_key)
-            if not self.access_token or str(self.access_token).strip() == "":
-                LOG.warning("No access_token found in config — running PAPER mode")
+            if not self.access_token:
+                LOG.warning("No access_token — PAPER MODE")
                 self.kite = None
                 self.mode = "paper"
                 return
 
             self.kite.set_access_token(self.access_token)
-            profile = self.kite.profile()  # safe allowed call
-            LOG.info("Connected to KiteConnect as %s (%s)", profile.get("user_id"), profile.get("user_name"))
+            prof = self.kite.profile()
+            LOG.info("Connected live as %s (%s)", prof.get("user_id"), prof.get("user_name"))
             self.mode = "live"
+
         except Exception as e:
-            LOG.error("Live KiteConnect connection failed -> PAPER mode. Reason: %s", repr(e))
+            LOG.error("KiteConnect connect failed -> PAPER MODE: %s", repr(e))
             self.kite = None
             self.mode = "paper"
 
-    # -------------------------
-    # Public: full option chain snapshot
-    # -------------------------
-    def get_option_chain_snapshot(self, symbol: str = "NIFTY", width: int = 1500, expiry: Optional[str] = None,
-                                  exchange: str = "NFO") -> pd.DataFrame:
-        """
-        Return a tidy DataFrame with option chain and a top underlying row.
+    # -------------------------------------------------
+    # MAIN: get_option_chain_snapshot
+    # -------------------------------------------------
+    def get_option_chain_snapshot(
+        self,
+        symbol: str = "NIFTY",
+        width: int = 1500,
+        expiry: Optional[str] = None,
+        exchange: str = "NFO"
+    ) -> pd.DataFrame:
 
-        Guarantees each row has:
-          strike, option_type, tradingsymbol, instrument_token, expiry,
-          best_bid, best_ask, ltp, spot, open_interest, instrument_type
-        """
-        # short-circuit cache (1s freshness)
         now = datetime.utcnow()
+
+        # Cache for <1 sec
         if self._cache["ts"] and (now - self._cache["ts"]).total_seconds() < 1:
             cached = self._cache["data"]
             if isinstance(cached, pd.DataFrame):
                 return cached.copy()
 
+        # PAPER MODE
         if self.mode != "live" or not self.kite:
-            LOG.info("Running PAPER snapshot (no live kite connection)")
+            LOG.info("PAPER snapshot call")
             df = self._paper_snapshot(symbol, width)
-            # ensure underlying row
-            df = self._ensure_underlying_row(df, symbol, spot_override=None)
-            # replace any NaN with None for JSON-safety
-            df = df.where(pd.notnull(df), None)
+            df = self._ensure_underlying_row(df, symbol)
+            df = self._sanitize(df)
             self._cache["ts"] = now
             self._cache["data"] = df
             return df
 
+        # LIVE MODE
         try:
             instruments = self._fetch_instruments(exchange)
             if not instruments:
-                LOG.warning("No instruments found -> PAPER fallback")
-                df = self._paper_snapshot(symbol, width)
-                df = self._ensure_underlying_row(df, symbol, spot_override=None)
-                df = df.where(pd.notnull(df), None)
-                self._cache["ts"] = now
-                self._cache["data"] = df
-                return df
+                LOG.warning("No instruments — PAPER fallback")
+                return self._fallback(now, symbol, width)
 
             expiries = self._get_expiries_for_symbol(instruments, symbol)
             if not expiries:
-                LOG.warning("No expiries found -> PAPER fallback")
-                df = self._paper_snapshot(symbol, width)
-                df = self._ensure_underlying_row(df, symbol, spot_override=None)
-                df = df.where(pd.notnull(df), None)
-                self._cache["ts"] = now
-                self._cache["data"] = df
-                return df
+                LOG.warning("No expiries — PAPER fallback")
+                return self._fallback(now, symbol, width)
 
-            chosen_expiry = expiry if expiry else self._choose_preferred_expiry(expiries)
-            LOG.info("Chosen expiry for %s -> %s", symbol, chosen_expiry)
-
+            # --------
+            # Early Spot Fetch
+            # --------
             spot = self._get_spot(symbol)
             LOG.info("Spot for %s = %s", symbol, spot)
 
-            # collect option instruments for chosen expiry
-            option_rows: List[Dict[str, Any]] = []
-            strike_pattern = re.compile(r"(\d+)(CE|PE)$", flags=re.IGNORECASE)
+            # --------
+            # EXPIRY SELECTION
+            # --------
+            if expiry:
+                chosen_expiry = expiry
+            else:
+                chosen_expiry = self._choose_expiry_scored(instruments, symbol, spot, width, expiries)
+
+            LOG.info("Chosen expiry for %s -> %s", symbol, chosen_expiry)
+
+            # --------
+            # FILTER OPTIONS
+            # --------
+            strike_pat = re.compile(r"(\d+)(CE|PE)$", flags=re.IGNORECASE)
+            rows = []
 
             for ins in instruments:
                 ts = ins.get("tradingsymbol", "")
-                exch = ins.get("exchange", "")
-                if exch != exchange:
+                if not ts:
                     continue
-                if (ins.get("expiry") or "") != chosen_expiry:
+                if ins.get("exchange") != exchange:
+                    continue
+                if ins.get("expiry") != chosen_expiry:
                     continue
                 if not ts.upper().startswith(symbol.upper()):
                     continue
-                m = strike_pattern.search(ts)
+
+                m = strike_pat.search(ts)
                 if not m:
                     continue
                 strike = int(m.group(1))
-                opttype = m.group(2).upper()
+                opt = m.group(2).upper()
+
                 if abs(strike - spot) > width:
                     continue
-                option_rows.append({
+
+                rows.append({
                     "strike": strike,
-                    "option_type": opttype,
+                    "option_type": opt,
                     "tradingsymbol": ts,
-                    "instrument_token": int(ins.get("instrument_token")) if ins.get("instrument_token") else None,
-                    "expiry": ins.get("expiry"),
+                    "instrument_token": int(ins.get("instrument_token") or 0),
+                    "expiry": ins.get("expiry")
                 })
 
-            if not option_rows:
-                LOG.warning("No option instruments matched width filter -> PAPER fallback")
-                df = self._paper_snapshot(symbol, width)
-                df = self._ensure_underlying_row(df, symbol, spot_override=spot)
-                df = df.where(pd.notnull(df), None)
-                self._cache["ts"] = now
-                self._cache["data"] = df
-                return df
+            if not rows:
+                LOG.warning("No options match width — PAPER fallback")
+                return self._fallback(now, symbol, width, spot_override=spot)
 
-            option_df = pd.DataFrame(option_rows).dropna(subset=["instrument_token"]).astype({"instrument_token": int})
-            tokens = option_df["instrument_token"].astype(int).tolist()
-            ltp_rows = self._batch_ltp(tokens)
+            df = pd.DataFrame(rows).dropna(subset=["instrument_token"]).astype({"instrument_token": int})
 
-            ltp_df = pd.DataFrame(ltp_rows)
-            merged = option_df.merge(ltp_df, how="left", left_on="instrument_token", right_on="instrument_token")
-
-            # Normalize columns
+            # --------
+            # FETCH LTP
+            # --------
+            ltp_df = pd.DataFrame(self._batch_ltp(df["instrument_token"].tolist()))
+            merged = df.merge(ltp_df, how="left", on="instrument_token")
             merged["spot"] = spot
 
-            # Ensure instrument_type column exists and is safe to operate on
-            if "instrument_type" not in merged.columns:
-                merged["instrument_type"] = ""
-            else:
-                # fillna safely on Series
-                merged["instrument_type"] = merged["instrument_type"].fillna("").astype(str)
+            # Required columns
+            required = ["best_bid", "best_ask", "ltp", "open_interest"]
+            for c in required:
+                if c not in merged.columns:
+                    merged[c] = None
 
-            # Ensure price/oi columns exist
-            for col in ["best_bid", "best_ask", "ltp", "open_interest"]:
-                if col not in merged.columns:
-                    merged[col] = None
+            merged["instrument_type"] = merged["option_type"].apply(
+                lambda x: "CE" if str(x).upper() == "CE" else "PE"
+            )
 
-            final_cols = ["instrument_type", "strike", "option_type", "tradingsymbol", "instrument_token", "expiry",
-                          "best_bid", "best_ask", "ltp", "spot", "open_interest"]
-            merged = merged.loc[:, [c for c in final_cols if c in merged.columns]]
+            # Order columns
+            final_cols = [
+                "instrument_type", "strike", "option_type", "tradingsymbol",
+                "instrument_token", "expiry", "best_bid", "best_ask",
+                "ltp", "spot", "open_interest"
+            ]
+            merged = merged.loc[:, final_cols]
+            merged = merged.sort_values(["strike", "option_type"]).reset_index(drop=True)
 
-            # set instrument_type explicitly for options (CE/PE)
-            merged["instrument_type"] = merged["option_type"].apply(lambda x: "CE" if str(x).upper().startswith("CE") else "PE")
-
-            # sort and reset
-            merged = merged.sort_values(["strike", "option_type"], ascending=[True, True]).reset_index(drop=True)
-
-            # Convert NaN -> None to avoid JSON issues downstream
-            merged = merged.where(pd.notnull(merged), None)
-
-            # insert underlying row at top (underlying row built safe)
+            # Add underlying
             df_final = self._ensure_underlying_row(merged, symbol, spot_override=spot)
 
-            # final NaN -> None
-            df_final = df_final.where(pd.notnull(df_final), None)
+            # -------------------------
+            # NEW PATCH: ensure strike column contains NO NaN floats before sanitization
+            # This prevents `int(nan)` crashes in dashboard routes and keeps dtype safe.
+            # -------------------------
+            try:
+                if "strike" in df_final.columns:
+                    # make it object so None can be stored without upcasting to float/NaN
+                    try:
+                        df_final["strike"] = df_final["strike"].astype(object)
+                    except Exception:
+                        # if cast fails, ignore and continue
+                        pass
 
-            # cache and return
+                    def _clean_strike(x):
+                        # convert NaN/inf floats -> None, cast integer-like floats to int
+                        if x is None:
+                            return None
+                        if isinstance(x, float):
+                            if math.isnan(x) or math.isinf(x):
+                                return None
+                            # float like 19500.0 -> int 19500
+                            if x.is_integer():
+                                return int(x)
+                            return x
+                        return x
+
+                    df_final["strike"] = df_final["strike"].apply(_clean_strike)
+            except Exception:
+                LOG.debug("Strike cleaning failed (non-fatal)", exc_info=True)
+
+            # SANITIZE: remove NaN before returning
+            df_final = self._sanitize(df_final)
+
             self._cache["ts"] = now
             self._cache["data"] = df_final
             return df_final
 
-        except Exception as e:
-            LOG.exception("get_option_chain_snapshot failed -> PAPER fallback. Reason: %s", repr(e))
-            df = self._paper_snapshot(symbol, width)
-            df = self._ensure_underlying_row(df, symbol, spot_override=None)
-            df = df.where(pd.notnull(df), None)
-            self._cache["ts"] = now
-            self._cache["data"] = df
-            return df
+        except Exception:
+            LOG.exception("Live chain failed — PAPER fallback")
+            return self._fallback(now, symbol, width)
 
-    # -------------------------
-    # Helpers
-    # -------------------------
-    def _fetch_instruments(self, exchange: str = "NFO") -> List[dict]:
+    # -------------------------------------------------
+    # SANITIZATION (VERY IMPORTANT)
+    # -------------------------------------------------
+    def _sanitize(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Convert NaN/inf to None for dashboard JSON safety."""
+        df = df.copy()
+        # Replace NaN and inf
+        for c in df.columns:
+            df[c] = df[c].apply(
+                lambda x: None
+                if (isinstance(x, float) and (math.isnan(x) or math.isinf(x)))
+                else x
+            )
+        return df
+
+    # -------------------------------------------------
+    # FALLBACK + HELPERS
+    # -------------------------------------------------
+    def _fallback(self, now, symbol, width, spot_override=None):
+        df = self._paper_snapshot(symbol, width)
+        df = self._ensure_underlying_row(df, symbol, spot_override)
+        df = self._sanitize(df)
+        self._cache["ts"] = now
+        self._cache["data"] = df
+        return df
+
+    def _fetch_instruments(self, exchange="NFO"):
         try:
-            ins = self.kite.instruments(exchange)
-            return ins
+            return self.kite.instruments(exchange)
         except Exception as e:
-            LOG.error("Failed to fetch instruments: %s", repr(e))
+            LOG.error("instruments() failed: %s", repr(e))
             return []
 
-    def _get_expiries_for_symbol(self, instruments: List[dict], symbol: str) -> List[str]:
-        expiries = set()
-        sym_upper = symbol.upper()
+    def _get_expiries_for_symbol(self, instruments, symbol):
+        out = set()
+        su = symbol.upper()
         for ins in instruments:
             ts = ins.get("tradingsymbol", "")
-            if not ts:
-                continue
-            if ts.upper().startswith(sym_upper):
-                expiry = ins.get("expiry")
-                if expiry:
-                    expiries.add(expiry)
+            if ts.upper().startswith(su) and ins.get("expiry"):
+                out.add(ins["expiry"])
         try:
-            return sorted(list(expiries), key=lambda x: datetime.fromisoformat(x))
-        except Exception:
-            return sorted(list(expiries))
+            return sorted(out, key=lambda x: datetime.fromisoformat(x))
+        except:
+            return sorted(out)
 
-    def _choose_preferred_expiry(self, expiries: List[str]) -> str:
+    # -------------------------------------------------
+    # EXPIRY SCORING
+    # -------------------------------------------------
+    def _choose_expiry_scored(self, instruments, symbol, spot, width, expiries):
+        strike_pat = re.compile(r"(\d+)(CE|PE)$", flags=re.IGNORECASE)
+        scores: Dict[str, int] = {}
+
+        for ins in instruments:
+            ts = ins.get("tradingsymbol", "")
+            exp = ins.get("expiry")
+            if not ts or not exp:
+                continue
+            if not ts.upper().startswith(symbol.upper()):
+                continue
+            m = strike_pat.search(ts)
+            if not m:
+                continue
+            strike = int(m.group(1))
+            if abs(strike - spot) <= width:
+                scores[exp] = scores.get(exp, 0) + 1
+
+        if scores:
+            chosen = sorted(
+                scores.items(),
+                key=lambda x: (-x[1], x[0])  # Best score, earliest expiry
+            )[0][0]
+            LOG.info("Expiry scoring selected %s (scores=%s)", chosen, scores)
+            return chosen
+
+        # fallback if scoring fails
+        return self._choose_preferred_expiry(expiries)
+
+    def _choose_preferred_expiry(self, expiries):
         parsed = []
         for e in expiries:
             try:
-                dt = datetime.fromisoformat(e)
-                parsed.append(dt)
-            except Exception:
-                continue
+                parsed.append(datetime.fromisoformat(e))
+            except:
+                pass
         if not parsed:
             return sorted(expiries)[0]
-        today = datetime.now().date()
-        thursday_candidates = [p for p in parsed if p.date() >= today and p.weekday() == 3]
-        if thursday_candidates:
-            chosen = min(thursday_candidates)
-            return chosen.date().isoformat()
-        future = [p for p in parsed if p.date() >= today]
-        if future:
-            chosen = min(future)
-            return chosen.date().isoformat()
-        chosen = min(parsed)
-        return chosen.date().isoformat()
 
-    def _get_spot(self, symbol: str) -> int:
-        candidates = [
+        today = datetime.now().date()
+
+        # Prefer Thursday >= today
+        thr = [p for p in parsed if p.date() >= today and p.weekday() == 3]
+        if thr:
+            return min(thr).date().isoformat()
+
+        fut = [p for p in parsed if p.date() >= today]
+        if fut:
+            return min(fut).date().isoformat()
+
+        return min(parsed).date().isoformat()
+
+    # -------------------------------------------------
+    # SPOT
+    # -------------------------------------------------
+    def _get_spot(self, symbol):
+        cands = [
             f"NSE:{symbol}",
             f"NFO:{symbol}",
-            f"NSE:{symbol} 50",
             f"{symbol}",
             f"{symbol}-INDEX",
         ]
-        for cand in candidates:
+        for c in cands:
             try:
-                resp = self.kite.ltp([cand])
-                if isinstance(resp, dict) and len(resp) > 0:
-                    val = next(iter(resp.values()))
-                    if isinstance(val, dict):
-                        if "last_price" in val:
-                            return int(round(val["last_price"]))
-                        if "lastPrice" in val:
-                            return int(round(val["lastPrice"]))
-                        if "ltp" in val:
-                            return int(round(val["ltp"]))
-            except Exception:
+                resp = self.kite.ltp([c])
+                if not resp:
+                    continue
+                v = next(iter(resp.values()))
+                if "last_price" in v:
+                    return int(round(v["last_price"]))
+                if "ltp" in v:
+                    return int(round(v["ltp"]))
+            except:
                 continue
-        LOG.warning("Unable to fetch spot for %s; using fallback 21000", symbol)
+        LOG.warning("Spot fallback for %s -> 21000", symbol)
         return 21000
 
+    # -------------------------------------------------
+    # LTP BATCH
+    # -------------------------------------------------
     def _batch_ltp(self, tokens: List[int]) -> List[dict]:
         out = []
         if not tokens:
             return out
-        batches = [tokens[i:i + self.batch_size] for i in range(0, len(tokens), self.batch_size)]
+
+        batches = [tokens[i:i+self.batch_size] for i in range(0, len(tokens), self.batch_size)]
+
         for batch in batches:
             try:
                 resp = self.kite.ltp(batch)
-                for k, v in resp.items():
-                    token = None
-                    last_price = None
-                    oi = None
-                    best_bid = None
-                    best_ask = None
-                    if isinstance(v, dict):
-                        token = v.get("instrument_token") or v.get("instrumentToken") or None
-                        last_price = v.get("last_price") or v.get("lastPrice") or v.get("ltp") or None
-                        oi = v.get("oi") or v.get("open_interest") or v.get("openInterest") or None
-                        best_bid = v.get("best_bid") or v.get("bestBid") or v.get("buy_price") or None
-                        best_ask = v.get("best_ask") or v.get("bestAsk") or v.get("sell_price") or None
-                    if token is None:
-                        try:
-                            token = int(k)
-                        except Exception:
-                            token = None
+                for _, v in resp.items():
+                    if not isinstance(v, dict):
+                        continue
                     out.append({
-                        "instrument_token": int(token) if token is not None else None,
-                        "ltp": float(last_price) if last_price is not None else None,
-                        "open_interest": int(oi) if oi is not None else None,
-                        "best_bid": float(best_bid) if best_bid is not None else None,
-                        "best_ask": float(best_ask) if best_ask is not None else None,
-                        "raw_key": k,
+                        "instrument_token": v.get("instrument_token"),
+                        "ltp": v.get("last_price") or v.get("ltp"),
+                        "best_bid": v.get("best_bid"),
+                        "best_ask": v.get("best_ask"),
+                        "open_interest": v.get("oi") or v.get("open_interest"),
                     })
             except Exception as e:
-                LOG.error("Batch LTP failed for batch size %s -> %s", len(batch), repr(e))
-                # fallback to single calls to be resilient
-                for single in batch:
-                    try:
-                        resp = self.kite.ltp([single])
-                        for k, v in resp.items():
-                            token = v.get("instrument_token") if isinstance(v, dict) else None
-                            last_price = v.get("last_price") or v.get("ltp") if isinstance(v, dict) else None
-                            oi = v.get("oi") if isinstance(v, dict) else None
-                            best_bid = v.get("best_bid") if isinstance(v, dict) else None
-                            best_ask = v.get("best_ask") if isinstance(v, dict) else None
-                            out.append({
-                                "instrument_token": int(token) if token is not None else None,
-                                "ltp": float(last_price) if last_price is not None else None,
-                                "open_interest": int(oi) if oi is not None else None,
-                                "best_bid": float(best_bid) if best_bid is not None else None,
-                                "best_ask": float(best_ask) if best_ask is not None else None,
-                                "raw_key": k,
-                            })
-                    except Exception:
-                        LOG.warning("Single ltp call failed for %s", single)
-                        out.append({
-                            "instrument_token": int(single) if isinstance(single, (int, float)) else None,
-                            "ltp": None,
-                            "open_interest": None,
-                            "best_bid": None,
-                            "best_ask": None,
-                            "raw_key": str(single),
-                        })
+                LOG.error("batch_ltp failed: %s", repr(e))
+
         return out
 
-    # -------------------------
-    # PAPER fallback
-    # -------------------------
-    def _paper_snapshot(self, symbol: str = "NIFTY", width: int = 1500) -> pd.DataFrame:
+    # -------------------------------------------------
+    # PAPER SNAPSHOT
+    # -------------------------------------------------
+    def _paper_snapshot(self, symbol="NIFTY", width=1500):
         spot = 21000
-        strikes = list(range(spot - width, spot + width + 1, 50))
+        strikes = list(range(spot-width, spot+width+1, 50))
         rows = []
         for st in strikes:
             for opt in ["CE", "PE"]:
                 rows.append({
+                    "instrument_type": opt,
                     "strike": st,
                     "option_type": opt,
                     "tradingsymbol": f"{symbol}{st}{opt}",
-                    "instrument_token": st * 10 + (1 if opt == "CE" else 2),
-                    "expiry": (date.today() + timedelta(days=40)).isoformat(),
-                    "best_bid": 5.0,
+                    "instrument_token": st * 10,
+                    "expiry": (date.today()+timedelta(days=40)).isoformat(),
+                    "best_bid": 5,
                     "best_ask": 5.5,
                     "ltp": 5.25,
                     "spot": spot,
@@ -388,27 +424,20 @@ class KiteData:
                 })
         return pd.DataFrame(rows)
 
-    # -------------------------
-    # Ensure underlying row present
-    # -------------------------
-    def _ensure_underlying_row(self, df: pd.DataFrame, symbol: str, spot_override: Optional[float] = None) -> pd.DataFrame:
-        """
-        Insert a leading row with instrument_type 'UNDERLYING' and keys: tradingsymbol, ltp, spot, timestamp.
-        If df already contains an UNDERLYING row, refresh it.
-        """
+    # -------------------------------------------------
+    # UNDERLYING ROW
+    # -------------------------------------------------
+    def _ensure_underlying_row(self, df, symbol, spot_override=None):
         try:
-            spot_val = spot_override if spot_override is not None else (int(df["spot"].iloc[0]) if ("spot" in df.columns and not df.empty) else None)
-        except Exception:
-            spot_val = None
-
-        if spot_val is None:
+            spot_val = spot_override if spot_override is not None else df["spot"].iloc[0]
+        except:
             spot_val = 21000
 
-        underlying_row = {
+        und = {
             "instrument_type": "UNDERLYING",
+            "tradingsymbol": f"{symbol}-INDEX",
             "strike": None,
             "option_type": None,
-            "tradingsymbol": f"{symbol}-INDEX",
             "instrument_token": None,
             "expiry": None,
             "best_bid": None,
@@ -419,65 +448,41 @@ class KiteData:
             "timestamp": datetime.now().isoformat(timespec="seconds"),
         }
 
-        # Guard: convert any pd.NA/NaN inside row to None
-        for k, v in list(underlying_row.items()):
-            try:
-                if pd.isna(v):
-                    underlying_row[k] = None
-            except Exception:
-                pass
-
-        # If df already has an underlying row, drop it first
+        # Remove any existing underlying row
         if "instrument_type" in df.columns:
-            try:
-                df = df[~(df["instrument_type"].astype(str).str.upper() == "UNDERLYING")].copy()
-            except Exception:
-                # fallback: remove rows whose tradingsymbol looks like underlying
-                df = df[~(df.get("tradingsymbol", "").astype(str).str.upper().str.contains("-INDEX"))].copy()
+            df = df[df["instrument_type"].astype(str).str.upper() != "UNDERLYING"]
 
-        # Prepend underlying row
-        df2 = pd.concat([pd.DataFrame([underlying_row]), df], ignore_index=True, sort=False)
-        # Ensure consistent column order
-        cols = ["instrument_type", "tradingsymbol", "strike", "option_type", "instrument_token", "expiry",
-                "best_bid", "best_ask", "ltp", "spot", "open_interest", "timestamp"]
+        cols = [
+            "instrument_type", "tradingsymbol", "strike", "option_type",
+            "instrument_token", "expiry", "best_bid", "best_ask",
+            "ltp", "spot", "open_interest", "timestamp"
+        ]
+
+        df2 = pd.concat([pd.DataFrame([und]), df], ignore_index=True, sort=False)
         cols_present = [c for c in cols if c in df2.columns]
         return df2.loc[:, cols_present].copy()
 
 
-# Public helper used across system
-def full_option_chain(api, symbol: str = "NIFTY", width: int = 1500, expiry=None) -> pd.DataFrame:
-    """
-    Universal helper used by engine/signalgen/backtests.
-    Accepts:
-      - KiteData instance
-      - KiteAPI instance (your wrapper)
-      - raw KiteConnect (falls back to KiteData)
-    Returns tidy DataFrame with underlying row included.
-    """
-    from src.live.kite_data import KiteData as _KD
-
-    # Case 1: KiteData instance
-    if isinstance(api, _KD):
-        return api.get_option_chain_snapshot(symbol=symbol, width=width, expiry=expiry)
-
-    # Case 2: KiteAPI (wrapper) - try its get_live_snapshot or get_option_chain
+# -------------------------------------------------
+# WRAPPER (unchanged)
+# -------------------------------------------------
+def full_option_chain(api, symbol="NIFTY", width=1500, expiry=None):
+    from src.live.kite_data import KiteData as KD
+    if isinstance(api, KD):
+        return api.get_option_chain_snapshot(symbol, width, expiry)
     try:
         if hasattr(api, "get_live_snapshot"):
             df = api.get_live_snapshot(symbol)
             if isinstance(df, pd.DataFrame) and not df.empty:
-                # Ensure underlying present
-                kd = _KD()
-                df2 = kd._ensure_underlying_row(df, symbol, spot_override=None)
+                kd = KD()
+                df2 = kd._ensure_underlying_row(df, symbol)
                 return df2.where(pd.notnull(df2), None)
-    except Exception:
+    except:
         pass
-
-    # Case 3: raw kiteconnect-like object -> delegate to KiteData
     try:
-        kd = _KD()
-        return kd.get_option_chain_snapshot(symbol=symbol, width=width, expiry=expiry)
-    except Exception:
-        # Final fallback paper snapshot
-        kd = _KD()
-        dfp = kd._paper_snapshot(symbol=symbol, width=width)
+        kd = KD()
+        return kd.get_option_chain_snapshot(symbol, width, expiry)
+    except:
+        kd = KD()
+        dfp = kd._paper_snapshot(symbol, width)
         return dfp.where(pd.notnull(dfp), None)

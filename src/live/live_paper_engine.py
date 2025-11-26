@@ -307,6 +307,12 @@ class LivePaperEngine:
                             json.dump(self._sanitize(ic_obj.as_dict() if hasattr(ic_obj, "as_dict") else {}), f, indent=2)
                     except Exception:
                         log.exception("Failed to write current_position after entry")
+                    # --- ensure signal generator is frozen after an entry (defensive) ---
+                    try:
+                        if hasattr(self.signal_gen, "freeze"):
+                            self.signal_gen.freeze()
+                    except Exception:
+                        pass
             except Exception:
                 log.exception("Failed to enter paper trade")
 
@@ -328,6 +334,12 @@ class LivePaperEngine:
                             json.dump({}, f, indent=2)
                     except Exception:
                         log.exception("Failed to clear current_position after manual exit")
+                    # Unfreeze signal generator now that position closed
+                    try:
+                        if hasattr(self.signal_gen, "unfreeze"):
+                            self.signal_gen.unfreeze()
+                    except Exception:
+                        pass
                 else:
                     expiry_date = None
                     try:
@@ -362,6 +374,12 @@ class LivePaperEngine:
                                 json.dump({}, f, indent=2)
                         except Exception:
                             log.exception("Failed to clear current_position after expiry exit")
+                        # Unfreeze signal generator now that position closed
+                        try:
+                            if hasattr(self.signal_gen, "unfreeze"):
+                                self.signal_gen.unfreeze()
+                        except Exception:
+                            pass
                     else:
                         # exit engine scan
                         try:
@@ -376,6 +394,12 @@ class LivePaperEngine:
                                         json.dump({}, f, indent=2)
                                 except Exception:
                                     log.exception("Failed to clear current_position after exit_engine exit")
+                                # Unfreeze signal generator now that position closed
+                                try:
+                                    if hasattr(self.signal_gen, "unfreeze"):
+                                        self.signal_gen.unfreeze()
+                                except Exception:
+                                    pass
                         except Exception:
                             log.exception("ExitEngine scan failed")
 

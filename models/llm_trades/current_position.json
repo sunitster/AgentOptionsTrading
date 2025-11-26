@@ -1,1 +1,15 @@
-{}
+{
+  "symbol": "NIFTY",
+  "expiry": "2025-12-30",
+  "short_put": 20000.0,
+  "long_put": 19500.0,
+  "short_call": 22000.0,
+  "long_call": null,
+  "short_put_price": 3.8,
+  "long_put_price": null,
+  "short_call_price": 4359.2,
+  "long_call_price": null,
+  "lot_size": 25,
+  "size_aggressiveness": 1.0,
+  "entry_credit": 4363.0
+}

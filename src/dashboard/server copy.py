@@ -6,7 +6,6 @@ Fixes:
 - sanitize() now converts NaN -> None (JSON-safe).
 - heatmap() reads instrument_type defensively (str(...).upper()).
 - get_state() uses sanitize before returning JSON so NaNs never leak.
-- /api/atm made robust: rejects NaN/inf and malformed strikes (no more int(nan) crash).
 """
 
 from datetime import datetime
@@ -188,114 +187,30 @@ async def force_exit():
     return {"status": "ok", "message": "Manual exit signal written"}
 
 
-# ------------------------------
-# Robust /api/atm
-# ------------------------------
 @app.get("/api/atm")
 async def get_atm():
-    """
-    Return ATM-related data. Defensive parsing: ignore NaN/inf strikes.
-    """
     snapshot = safe_load_json(SNAPSHOT_FILE, default=[])
 
     if not snapshot:
-        return JSONResponse(sanitize({"atm": None, "count_strikes": 0}))
+        return {"atm": None, "count_strikes": 0}
 
-    # Build a clean set of strikes:
-    # - skip None
-    # - skip floats that are NaN or inf
-    # - attempt safe numeric conversion from strings/floats -> integer strikes
-    valid_strikes = set()
-    underlying_price = None
-
-    for r in snapshot:
-        # pick underlying price if present (case-insensitive)
-        try:
-            if isinstance(r, dict):
-                typ = str(r.get("instrument_type") or "").upper()
-                if typ == "UNDERLYING":
-                    underlying_price = r.get("ltp") or r.get("spot") or underlying_price
-        except Exception:
-            # keep robust
-            pass
-
-        # fetch strike safely
-        s = None
-        try:
-            s_raw = r.get("strike") if isinstance(r, dict) else None
-            if s_raw is None:
-                s = None
-            else:
-                # if it's already int, accept
-                if isinstance(s_raw, int):
-                    s = s_raw
-                elif isinstance(s_raw, float):
-                    if math.isnan(s_raw) or math.isinf(s_raw):
-                        s = None
-                    else:
-                        # 19500.0 -> 19500
-                        if s_raw.is_integer():
-                            s = int(s_raw)
-                        else:
-                            s = int(round(s_raw))
-                elif isinstance(s_raw, str):
-                    # strip and try float -> int
-                    try:
-                        sf = float(s_raw.strip())
-                        if math.isnan(sf) or math.isinf(sf):
-                            s = None
-                        else:
-                            if sf.is_integer():
-                                s = int(sf)
-                            else:
-                                s = int(round(sf))
-                    except Exception:
-                        s = None
-                else:
-                    # unknown type, try to coerce
-                    try:
-                        sf = float(s_raw)
-                        if math.isnan(sf) or math.isinf(sf):
-                            s = None
-                        else:
-                            if sf.is_integer():
-                                s = int(sf)
-                            else:
-                                s = int(round(sf))
-                    except Exception:
-                        s = None
-        except Exception:
-            s = None
-
-        if s is not None:
-            valid_strikes.add(s)
-
-    strikes = sorted(valid_strikes)
+    strikes = sorted({int(r.get("strike")) for r in snapshot if r.get("strike") is not None})
 
     if not strikes:
-        LOG.warning("get_atm: no valid strikes found in snapshot")
-        return JSONResponse(sanitize({"atm": None, "count_strikes": 0, "underlying": underlying_price}))
+        return {"atm": None, "count_strikes": 0}
 
-    # Determine ATM: if underlying price present choose closest; otherwise middle strike
-    try:
-        if underlying_price is not None:
-            # underlying_price might be string/float, make safe float
-            try:
-                up = float(underlying_price)
-            except Exception:
-                up = None
+    underlying_price = None
+    for r in snapshot:
+        if isinstance(r, dict) and r.get("instrument_type") == "UNDERLYING":
+            underlying_price = r.get("ltp")
+            break
 
-            if up is not None:
-                atm = min(strikes, key=lambda s: abs(s - up))
-            else:
-                atm = strikes[len(strikes) // 2]
-        else:
-            atm = strikes[len(strikes) // 2]
-    except Exception:
+    if underlying_price:
+        atm = min(strikes, key=lambda s: abs(s - underlying_price))
+    else:
         atm = strikes[len(strikes) // 2]
 
-    payload = {"atm": atm, "count_strikes": len(strikes), "underlying": underlying_price}
-    return JSONResponse(sanitize(payload))
+    return {"atm": atm, "count_strikes": len(strikes), "underlying": underlying_price}
 
 
 @app.get("/api/ic-position")
@@ -363,24 +278,7 @@ async def heatmap():
             continue
 
         try:
-            # robust conversion for strike
-            if isinstance(strike, float):
-                if math.isnan(strike) or math.isinf(strike):
-                    continue
-                if strike.is_integer():
-                    strike = int(strike)
-                else:
-                    strike = int(round(strike))
-            elif isinstance(strike, str):
-                try:
-                    sf = float(strike.strip())
-                    if math.isnan(sf) or math.isinf(sf):
-                        continue
-                    strike = int(round(sf))
-                except Exception:
-                    continue
-            else:
-                strike = int(strike)
+            strike = int(strike)
         except Exception:
             continue
 
@@ -390,21 +288,9 @@ async def heatmap():
         if strike not in strike_map:
             strike_map[strike] = {"strike": strike, "CE": None, "PE": None}
 
-        # ensure ltp is safe float
-        try:
-            ltp_val = r.get("ltp")
-            if ltp_val is None:
-                ltp = 0.0
-            else:
-                ltp = float(ltp_val)
-                if math.isnan(ltp) or math.isinf(ltp):
-                    ltp = 0.0
-        except Exception:
-            ltp = 0.0
-
         entry = {
             "tradingsymbol": r.get("tradingsymbol"),
-            "ltp": ltp,
+            "ltp": float(r.get("ltp") or 0.0),
             "oi": r.get("open_interest"),
         }
 
