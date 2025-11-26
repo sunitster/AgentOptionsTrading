@@ -1,0 +1,46 @@
+{
+  "strategy": {
+    "direction": "neutral",
+    "min_iv": 0.12,
+    "max_iv": 0.6,
+    "dte_min": 14,
+    "dte_max": 60,
+    "size_aggressiveness": 1.0
+  },
+  "meta": {
+    "strategy_parsed": {
+      "direction": "neutral",
+      "min_iv": 0.12,
+      "max_iv": 0.6,
+      "dte_min": 14,
+      "dte_max": 60,
+      "moneyness_min": -999.0,
+      "moneyness_max": 999.0,
+      "size_aggressiveness": 1.0,
+      "iv_rank_threshold": null
+    },
+    "filters_applied": {
+      "min_iv": 0.12,
+      "max_iv": 0.6,
+      "dte_min": 14,
+      "dte_max": 60,
+      "direction": "neutral"
+    },
+    "sizing_defaults_train": {
+      "size_scale": 1.2121624717309216,
+      "max_size": 50.0
+    },
+    "sizing_defaults_val": {
+      "size_scale": 1.2121624717309216,
+      "max_size": 50.0
+    },
+    "n_rows_after_filter": {
+      "train": 732867,
+      "val": 83900
+    }
+  },
+  "rmse": 0.5692402966982397,
+  "pnl": 52705.54417252104,
+  "n_trades": 83900,
+  "timestamp": 1763440108.842102
+}

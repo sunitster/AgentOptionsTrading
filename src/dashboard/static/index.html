@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>IC Live Paper Dashboard — Advanced</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/modern-normalize/2.0.0/modern-normalize.min.css" />
+  <style>
+    body { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background:#0b1120; color:#e5e7eb; }
+    .page{ max-width:1400px; margin:0 auto; padding:16px 24px 32px; }
+    header{ display:flex; justify-content:space-between; align-items:baseline; margin-bottom:12px; }
+    h1{ font-size:1.4rem; margin:0 }
+    .subtitle{ color:#9ca3af; font-size:0.9rem }
+    .controls{ display:flex; gap:8px; align-items:center; margin-bottom:10px }
+    .metrics{ display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:12px; margin-bottom:12px }
+    .card{ background:#020617; border-radius:10px; padding:10px 12px; border:1px solid #1f2937 }
+    .card-title{ font-size:0.8rem; color:#9ca3af }
+    .card-value{ font-size:1.15rem; margin-top:4px }
+    .layout{ display:grid; grid-template-columns:2fr 1fr; gap:16px; margin-bottom:12px }
+    .subgrid{ display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:12px }
+    table{ width:100%; border-collapse:collapse; font-size:0.82rem }
+    th, td{ padding:6px 8px; border-bottom:1px solid #111827; text-align:left }
+    th{ background:#020617; position:sticky; top:0; z-index:1 }
+    .small{ font-size:0.75rem; color:#9ca3af }
+    canvas{ width:100%; height:200px; background:#020617; border-radius:8px; border:1px solid #1f2937 }
+    pre{ font-size:0.78rem; background:#020617; padding:6px 8px; border-radius:6px; border:1px solid #1f2937; max-height:220px; overflow:auto; white-space:pre-wrap }
+    .heatmap { display:flex; gap:12px; align-items:flex-start; }
+    .ladder { background:#020617; padding:8px; border-radius:8px; border:1px solid #1f2937; width:100%; max-height:420px; overflow:auto; }
+    .ladder-row { display:flex; justify-content:space-between; padding:6px 8px; border-bottom:1px solid #0f1720; align-items:center; font-size:0.85rem; }
+    .ce { color:#60a5fa; width:40%; text-align:left; }
+    .strike { width:20%; text-align:center; color:#9ca3af }
+    .pe { color:#fb7185; width:40%; text-align:right; }
+    .margin-bar { height:18px; border-radius:8px; background:#0b1220; border:1px solid #1f2937; overflow:hidden; }
+    .margin-used { height:100%; background:linear-gradient(90deg,#ef4444,#f97316); width:0%; }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header>
+      <div>
+        <h1>📈 Iron Condor Live Paper Dashboard — Advanced</h1>
+        <div class="subtitle">Engine: <code>python -m src.cli.agent_trade live-paper</code></div>
+      </div>
+      <div class="small">Server time: <span id="server-time">—</span></div>
+    </header>
+
+    <div class="controls">
+      <button id="refresh-btn" class="btn-primary">🔁 Refresh now</button>
+      <button id="force-exit-btn" class="btn-danger">🚨 Force Exit Current IC</button>
+      <span class="small">Auto-refresh every <span id="refresh-seconds">5</span>s</span>
+    </div>
+
+    <section class="metrics">
+      <div class="card"><div class="card-title">Starting Balance</div><div class="card-value" id="metric-starting">₹0.00</div></div>
+      <div class="card"><div class="card-title">Current Capital</div><div class="card-value" id="metric-capital">₹0.00</div></div>
+      <div class="card"><div class="card-title">Net PnL</div><div class="card-value" id="metric-pnl">₹0.00</div></div>
+      <div class="card"><div class="card-title">Trades Today</div><div class="card-value" id="metric-trades">0</div></div>
+    </section>
+
+    <section class="layout">
+      <div>
+        <div class="section-title">PnL Over Time</div>
+        <canvas id="pnl-chart"></canvas>
+
+        <div class="subgrid">
+          <div>
+            <div class="section-title">Real-time LTP Chart (selected ATM)</div>
+            <canvas id="ltp-chart"></canvas>
+          </div>
+          <div>
+            <div class="section-title">Option Ladder Heatmap</div>
+            <div class="heatmap">
+              <div class="ladder" id="heatmap-ladder"></div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <div>
+        <div class="section-title">Risk State</div>
+        <pre id="risk-state">No risk state yet.</pre>
+
+        <div style="margin-top:12px;">
+          <div class="section-title">ATM & IC Position</div>
+          <pre id="atm-card">No ATM yet.</pre>
+          <pre id="ic-card">No open IC.</pre>
+        </div>
+
+        <div style="margin-top:12px;">
+          <div class="section-title">Greeks</div>
+          <pre id="greeks-card">—</pre>
+        </div>
+
+        <div style="margin-top:12px;">
+          <div class="section-title">Margin</div>
+          <div class="card">
+            <div class="small">Used / Available</div>
+            <div style="display:flex; align-items:center; gap:8px; margin-top:6px;">
+              <div style="flex:1;">
+                <div class="margin-bar"><div id="margin-used" class="margin-used"></div></div>
+              </div>
+              <div style="width:120px; text-align:right;"><span id="margin-text">—</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-title">Trade Log</div>
+      <div style="max-height:220px; overflow:auto; border-radius:8px; border:1px solid #1f2937;">
+        <table id="trades-table"><thead><tr><th>Time</th><th>Mode</th><th>PnL</th><th>Balance</th></tr></thead><tbody></tbody></table>
+      </div>
+    </section>
+
+    <section style="margin-top:12px;">
+      <div class="section-title">Latest Option Snapshot (top rows)</div>
+      <div style="max-height:260px; overflow:auto; border-radius:8px; border:1px solid #1f2937;">
+        <table id="snapshot-table"><thead><tr><th>Symbol</th><th>Expiry</th><th>Strike</th><th>Type</th><th>LTP</th></tr></thead><tbody></tbody></table>
+      </div>
+    </section>
+  </div>
+
+  <div id="toast"></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

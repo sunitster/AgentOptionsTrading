@@ -1,0 +1,30 @@
+{
+  "strategy": {
+    "direction": "bull",
+    "min_iv": 0.09477374871158337,
+    "max_iv": 0.51311190505902,
+    "size_aggressiveness": 1.3845825731729742,
+    "dte_min": 4,
+    "dte_max": 76
+  },
+  "meta": {
+    "applied_filters": {
+      "iv_range": [
+        0.09477374871158337,
+        0.51311190505902
+      ],
+      "dte_range": [
+        4,
+        76
+      ],
+      "direction": "bull"
+    },
+    "feature_deltas": {
+      "size_aggressiveness": 1.3845825731729742
+    }
+  },
+  "rmse": 0.6008485713646226,
+  "pnl": 106825.6362114358,
+  "n_trades": 118158,
+  "timestamp": 1763442732.4907656
+}

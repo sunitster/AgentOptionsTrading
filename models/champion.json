@@ -1,0 +1,6 @@
+{
+  "name": "lightgbm_champion",
+  "version": "v2",
+  "path": "models\\lightgbm_champion.pkl",
+  "registered_at": "2025-11-18T06:45:30.572423+00:00"
+}

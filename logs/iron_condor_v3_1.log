@@ -1,0 +1,288 @@
+2025-11-16 11:46:06,795 INFO iron_condor_v3_1 - Balanced v3.1 (config.yaml) loaded. Use --backtest --weekly --ai to run with RAG + Ollama.
+2025-11-16 11:47:03,977 INFO iron_condor_v3_1 - Starting run_weekly_with_ai_and_rag start=2025-01-01 end=2025-06-30 max=500
+2025-11-16 11:47:15,713 WARNING iron_condor_v3_1 - RAG DB query failed: (psycopg2.errors.UndefinedTable) relation "feature_docs" does not exist
+LINE 3:                 FROM feature_docs
+                             ^
+
+[SQL: 
+                SELECT id, date, title, content, iv, oi
+                FROM feature_docs
+                WHERE date <= %(d)s
+                ORDER BY date DESC, COALESCE(iv,0) DESC, COALESCE(oi,0) DESC
+                LIMIT %(k)s
+            ]
+[parameters: {'d': '2025-01-02', 'k': 6}]
+(Background on this error at: https://sqlalche.me/e/20/f405)
+2025-11-16 11:47:23,756 WARNING iron_condor_v3_1 - ollama_request failed: HTTPConnectionPool(host='localhost', port=11434): Read timed out. (read timeout=6.0)
+2025-11-16 11:47:23,756 INFO iron_condor_v3_1 - AI unavailable — fallback to keep
+2025-11-16 11:47:23,757 INFO iron_condor_v3_1 - AI decision WPLAN_20250102T000000_cada8fc6dbaa -> {'confidence': 0.0, 'suggestion': 'keep', 'explanation': 'fallback', 'docs_used_count': 6}
+2025-11-16 11:47:26,226 INFO iron_condor_v3_1 - Executed WPLAN_20250102T000000_cada8fc6dbaa pnl=6452.50
+2025-11-16 11:47:26,236 DEBUG iron_condor_v3_1 - plan rejected 2025-01-03
+2025-11-16 11:47:26,247 WARNING iron_condor_v3_1 - RAG DB query failed: (psycopg2.errors.UndefinedTable) relation "feature_docs" does not exist
+LINE 3:                 FROM feature_docs
+                             ^
+
+[SQL: 
+                SELECT id, date, title, content, iv, oi
+                FROM feature_docs
+                WHERE date <= %(d)s
+                ORDER BY date DESC, COALESCE(iv,0) DESC, COALESCE(oi,0) DESC
+                LIMIT %(k)s
+            ]
+[parameters: {'d': '2025-01-09', 'k': 6}]
+(Background on this error at: https://sqlalche.me/e/20/f405)
+2025-11-16 11:47:34,286 WARNING iron_condor_v3_1 - ollama_request failed: HTTPConnectionPool(host='localhost', port=11434): Read timed out. (read timeout=6.0)
+2025-11-16 11:47:34,286 INFO iron_condor_v3_1 - AI unavailable — fallback to keep
+2025-11-16 11:47:34,286 INFO iron_condor_v3_1 - AI decision WPLAN_20250109T000000_cc814f6c4548 -> {'confidence': 0.0, 'suggestion': 'keep', 'explanation': 'fallback', 'docs_used_count': 6}
+2025-11-16 11:47:34,306 INFO iron_condor_v3_1 - Executed WPLAN_20250109T000000_cc814f6c4548 pnl=6155.00
+2025-11-16 11:47:34,319 DEBUG iron_condor_v3_1 - plan rejected 2025-01-10
+2025-11-16 11:47:34,332 DEBUG iron_condor_v3_1 - plan rejected 2025-01-16
+2025-11-16 11:47:34,344 DEBUG iron_condor_v3_1 - plan rejected 2025-01-17
+2025-11-16 11:47:34,356 WARNING iron_condor_v3_1 - RAG DB query failed: (psycopg2.errors.UndefinedTable) relation "feature_docs" does not exist
+LINE 3:                 FROM feature_docs
+                             ^
+
+[SQL: 
+                SELECT id, date, title, content, iv, oi
+                FROM feature_docs
+                WHERE date <= %(d)s
+                ORDER BY date DESC, COALESCE(iv,0) DESC, COALESCE(oi,0) DESC
+                LIMIT %(k)s
+            ]
+[parameters: {'d': '2025-01-23', 'k': 6}]
+(Background on this error at: https://sqlalche.me/e/20/f405)
+2025-11-16 11:47:42,399 WARNING iron_condor_v3_1 - ollama_request failed: HTTPConnectionPool(host='localhost', port=11434): Read timed out. (read timeout=6.0)
+2025-11-16 11:47:42,399 INFO iron_condor_v3_1 - AI unavailable — fallback to keep
+2025-11-16 11:47:42,399 INFO iron_condor_v3_1 - AI decision WPLAN_20250123T000000_01ff90d0eca1 -> {'confidence': 0.0, 'suggestion': 'keep', 'explanation': 'fallback', 'docs_used_count': 6}
+2025-11-16 11:47:42,412 INFO iron_condor_v3_1 - Executed WPLAN_20250123T000000_01ff90d0eca1 pnl=607.52
+2025-11-16 11:47:42,424 WARNING iron_condor_v3_1 - RAG DB query failed: (psycopg2.errors.UndefinedTable) relation "feature_docs" does not exist
+LINE 3:                 FROM feature_docs
+                             ^
+
+[SQL: 
+                SELECT id, date, title, content, iv, oi
+                FROM feature_docs
+                WHERE date <= %(d)s
+                ORDER BY date DESC, COALESCE(iv,0) DESC, COALESCE(oi,0) DESC
+                LIMIT %(k)s
+            ]
+[parameters: {'d': '2025-01-24', 'k': 6}]
+(Background on this error at: https://sqlalche.me/e/20/f405)
+2025-11-16 11:47:50,388 WARNING iron_condor_v3_1 - ollama_request failed: Expecting value: line 1 column 1 (char 0)
+2025-11-16 11:47:50,390 INFO iron_condor_v3_1 - AI unavailable — fallback to keep
+2025-11-16 11:47:50,390 INFO iron_condor_v3_1 - AI decision WPLAN_20250124T000000_f5fce228ccca -> {'confidence': 0.0, 'suggestion': 'keep', 'explanation': 'fallback', 'docs_used_count': 6}
+2025-11-16 11:47:50,404 INFO iron_condor_v3_1 - Executed WPLAN_20250124T000000_f5fce228ccca pnl=6482.50
+2025-11-16 11:47:50,417 WARNING iron_condor_v3_1 - RAG DB query failed: (psycopg2.errors.UndefinedTable) relation "feature_docs" does not exist
+LINE 3:                 FROM feature_docs
+                             ^
+
+[SQL: 
+                SELECT id, date, title, content, iv, oi
+                FROM feature_docs
+                WHERE date <= %(d)s
+                ORDER BY date DESC, COALESCE(iv,0) DESC, COALESCE(oi,0) DESC
+                LIMIT %(k)s
+            ]
+[parameters: {'d': '2025-01-30', 'k': 6}]
+(Background on this error at: https://sqlalche.me/e/20/f405)
+2025-11-16 11:47:58,481 WARNING iron_condor_v3_1 - ollama_request failed: HTTPConnectionPool(host='localhost', port=11434): Read timed out. (read timeout=6.0)
+2025-11-16 11:47:58,481 INFO iron_condor_v3_1 - AI unavailable — fallback to keep
+2025-11-16 11:47:58,482 INFO iron_condor_v3_1 - AI decision WPLAN_20250130T000000_59ac80a458c7 -> {'confidence': 0.0, 'suggestion': 'keep', 'explanation': 'fallback', 'docs_used_count': 6}
+2025-11-16 11:47:58,493 INFO iron_condor_v3_1 - Executed WPLAN_20250130T000000_59ac80a458c7 pnl=7067.50
+2025-11-16 11:48:06,488 WARNING iron_condor_v3_1 - ollama_request failed: Expecting value: line 1 column 1 (char 0)
+2025-11-16 11:48:06,489 INFO iron_condor_v3_1 - AI unavailable — fallback to keep
+2025-11-16 11:48:06,489 INFO iron_condor_v3_1 - AI decision WPLAN_20250131T000000_095382726e27 -> {'confidence': 0.0, 'suggestion': 'keep', 'explanation': 'fallback', 'docs_used_count': 6}
+2025-11-16 11:48:06,504 INFO iron_condor_v3_1 - Executed WPLAN_20250131T000000_095382726e27 pnl=5457.50
+2025-11-16 11:48:06,515 DEBUG iron_condor_v3_1 - plan rejected 2025-02-06
+2025-11-16 11:48:13,617 WARNING iron_condor_v3_1 - ollama_request failed: Expecting value: line 1 column 1 (char 0)
+2025-11-16 11:48:13,617 INFO iron_condor_v3_1 - AI unavailable — fallback to keep
+2025-11-16 11:48:13,617 INFO iron_condor_v3_1 - AI decision WPLAN_20250207T000000_932e2da17f18 -> {'confidence': 0.0, 'suggestion': 'keep', 'explanation': 'fallback', 'docs_used_count': 6}
+2025-11-16 11:48:13,631 INFO iron_condor_v3_1 - Executed WPLAN_20250207T000000_932e2da17f18 pnl=2865.00
+2025-11-16 11:48:18,628 WARNING iron_condor_v3_1 - ollama_request failed: Expecting value: line 1 column 1 (char 0)
+2025-11-16 11:48:18,628 INFO iron_condor_v3_1 - AI unavailable — fallback to keep
+2025-11-16 11:48:18,628 INFO iron_condor_v3_1 - AI decision WPLAN_20250213T000000_66a272cf6e24 -> {'confidence': 0.0, 'suggestion': 'keep', 'explanation': 'fallback', 'docs_used_count': 6}
+2025-11-16 11:48:18,641 INFO iron_condor_v3_1 - Executed WPLAN_20250213T000000_66a272cf6e24 pnl=1625.00
+2025-11-16 11:48:25,377 WARNING iron_condor_v3_1 - ollama_request failed: Expecting value: line 1 column 1 (char 0)
+2025-11-16 11:48:25,377 INFO iron_condor_v3_1 - AI unavailable — fallback to keep
+2025-11-16 11:48:25,378 INFO iron_condor_v3_1 - AI decision WPLAN_20250214T000000_2056e3222a1c -> {'confidence': 0.0, 'suggestion': 'keep', 'explanation': 'fallback', 'docs_used_count': 6}
+2025-11-16 11:48:25,392 INFO iron_condor_v3_1 - Executed WPLAN_20250214T000000_2056e3222a1c pnl=6183.75
+2025-11-16 11:48:32,666 WARNING iron_condor_v3_1 - ollama_request failed: Expecting value: line 1 column 1 (char 0)
+2025-11-16 11:48:32,667 INFO iron_condor_v3_1 - AI unavailable — fallback to keep
+2025-11-16 11:48:32,667 INFO iron_condor_v3_1 - AI decision WPLAN_20250220T000000_5d15bef476db -> {'confidence': 0.0, 'suggestion': 'keep', 'explanation': 'fallback', 'docs_used_count': 6}
+2025-11-16 11:48:32,679 INFO iron_condor_v3_1 - Executed WPLAN_20250220T000000_5d15bef476db pnl=6179.99
+2025-11-16 11:48:32,690 DEBUG iron_condor_v3_1 - plan rejected 2025-02-21
+2025-11-16 11:48:40,777 WARNING iron_condor_v3_1 - ollama_request failed: HTTPConnectionPool(host='localhost', port=11434): Read timed out. (read timeout=6.0)
+2025-11-16 11:48:40,777 INFO iron_condor_v3_1 - AI unavailable — fallback to keep
+2025-11-16 11:48:40,777 INFO iron_condor_v3_1 - AI decision WPLAN_20250227T000000_d8a35b79b94b -> {'confidence': 0.0, 'suggestion': 'keep', 'explanation': 'fallback', 'docs_used_count': 6}
+2025-11-16 11:48:40,788 INFO iron_condor_v3_1 - Executed WPLAN_20250227T000000_d8a35b79b94b pnl=11617.50
+2025-11-16 11:48:48,687 WARNING iron_condor_v3_1 - ollama_request failed: Expecting value: line 1 column 1 (char 0)
+2025-11-16 11:48:48,688 INFO iron_condor_v3_1 - AI unavailable — fallback to keep
+2025-11-16 11:48:48,688 INFO iron_condor_v3_1 - AI decision WPLAN_20250228T000000_ab9f83441b16 -> {'confidence': 0.0, 'suggestion': 'keep', 'explanation': 'fallback', 'docs_used_count': 6}
+2025-11-16 11:48:48,700 INFO iron_condor_v3_1 - Executed WPLAN_20250228T000000_ab9f83441b16 pnl=11617.50
+2025-11-16 11:48:56,753 WARNING iron_condor_v3_1 - ollama_request failed: Expecting value: line 1 column 1 (char 0)
+2025-11-16 11:48:56,754 INFO iron_condor_v3_1 - AI unavailable — fallback to keep
+2025-11-16 11:48:56,754 INFO iron_condor_v3_1 - AI decision WPLAN_20250306T000000_8638cb84f41e -> {'confidence': 0.0, 'suggestion': 'keep', 'explanation': 'fallback', 'docs_used_count': 6}
+2025-11-16 11:48:56,768 INFO iron_condor_v3_1 - Executed WPLAN_20250306T000000_8638cb84f41e pnl=11617.50
+2025-11-16 11:48:56,779 DEBUG iron_condor_v3_1 - plan rejected 2025-03-07
+2025-11-16 11:49:04,350 WARNING iron_condor_v3_1 - ollama_request failed: Expecting value: line 1 column 1 (char 0)
+2025-11-16 11:49:04,350 INFO iron_condor_v3_1 - AI unavailable — fallback to keep
+2025-11-16 11:49:04,351 INFO iron_condor_v3_1 - AI decision WPLAN_20250313T000000_153c846c1184 -> {'confidence': 0.0, 'suggestion': 'keep', 'explanation': 'fallback', 'docs_used_count': 6}
+2025-11-16 11:49:05,348 WARNING iron_condor_v3_1 - no underlying at expiry for WPLAN_20250313T000000_153c846c1184
+2025-11-16 11:49:05,352 DEBUG iron_condor_v3_1 - skip 2025-03-14 iv_pct=50.10060362173038 regime=False
+2025-11-16 11:49:12,002 WARNING iron_condor_v3_1 - ollama_request failed: Expecting value: line 1 column 1 (char 0)
+2025-11-16 11:49:12,002 INFO iron_condor_v3_1 - AI unavailable — fallback to keep
+2025-11-16 11:49:12,002 INFO iron_condor_v3_1 - AI decision WPLAN_20250320T000000_75e4f027a04c -> {'confidence': 0.0, 'suggestion': 'keep', 'explanation': 'fallback', 'docs_used_count': 6}
+2025-11-16 11:49:12,013 INFO iron_condor_v3_1 - Executed WPLAN_20250320T000000_75e4f027a04c pnl=1662.50
+2025-11-16 11:49:20,079 WARNING iron_condor_v3_1 - ollama_request failed: HTTPConnectionPool(host='localhost', port=11434): Read timed out. (read timeout=6.0)
+2025-11-16 11:49:20,079 INFO iron_condor_v3_1 - AI unavailable — fallback to keep
+2025-11-16 11:49:20,079 INFO iron_condor_v3_1 - AI decision WPLAN_20250321T000000_845327fc1fdd -> {'confidence': 0.0, 'suggestion': 'keep', 'explanation': 'fallback', 'docs_used_count': 6}
+2025-11-16 11:49:20,094 INFO iron_condor_v3_1 - Executed WPLAN_20250321T000000_845327fc1fdd pnl=1515.00
+2025-11-16 11:49:20,106 DEBUG iron_condor_v3_1 - plan rejected 2025-03-27
+2025-11-16 11:49:28,170 WARNING iron_condor_v3_1 - ollama_request failed: HTTPConnectionPool(host='localhost', port=11434): Read timed out. (read timeout=6.0)
+2025-11-16 11:49:28,170 INFO iron_condor_v3_1 - AI unavailable — fallback to keep
+2025-11-16 11:49:28,170 INFO iron_condor_v3_1 - AI decision WPLAN_20250328T000000_b7cc0a0e56a7 -> {'confidence': 0.0, 'suggestion': 'keep', 'explanation': 'fallback', 'docs_used_count': 6}
+2025-11-16 11:49:28,181 INFO iron_condor_v3_1 - Executed WPLAN_20250328T000000_b7cc0a0e56a7 pnl=2023.76
+2025-11-16 11:49:36,184 WARNING iron_condor_v3_1 - ollama_request failed: Expecting value: line 1 column 1 (char 0)
+2025-11-16 11:49:36,184 INFO iron_condor_v3_1 - AI unavailable — fallback to keep
+2025-11-16 11:49:36,184 INFO iron_condor_v3_1 - AI decision WPLAN_20250403T000000_c481fe8bf0bc -> {'confidence': 0.0, 'suggestion': 'keep', 'explanation': 'fallback', 'docs_used_count': 6}
+2025-11-16 11:49:36,195 INFO iron_condor_v3_1 - Executed WPLAN_20250403T000000_c481fe8bf0bc pnl=7067.50
+2025-11-16 11:49:36,208 DEBUG iron_condor_v3_1 - plan rejected 2025-04-04
+2025-11-16 11:49:36,213 DEBUG iron_condor_v3_1 - skip 2025-04-10 iv_pct=50.10060362173038 regime=False
+2025-11-16 11:49:36,223 DEBUG iron_condor_v3_1 - plan rejected 2025-04-11
+2025-11-16 11:49:36,235 DEBUG iron_condor_v3_1 - plan rejected 2025-04-17
+2025-11-16 11:49:36,238 DEBUG iron_condor_v3_1 - skip 2025-04-18 iv_pct=50.10060362173038 regime=False
+2025-11-16 11:49:36,249 DEBUG iron_condor_v3_1 - plan rejected 2025-04-24
+2025-11-16 11:49:40,787 WARNING iron_condor_v3_1 - ollama_request failed: Expecting value: line 1 column 1 (char 0)
+2025-11-16 11:49:40,787 INFO iron_condor_v3_1 - AI unavailable — fallback to keep
+2025-11-16 11:49:40,787 INFO iron_condor_v3_1 - AI decision WPLAN_20250425T000000_c44e8c395618 -> {'confidence': 0.0, 'suggestion': 'keep', 'explanation': 'fallback', 'docs_used_count': 6}
+2025-11-16 11:49:41,694 WARNING iron_condor_v3_1 - no underlying at expiry for WPLAN_20250425T000000_c44e8c395618
+2025-11-16 11:49:41,702 DEBUG iron_condor_v3_1 - skip 2025-05-01 iv_pct=50.10060362173038 regime=False
+2025-11-16 11:50:10,829 INFO iron_condor_v3_1 - Starting run_weekly_with_ai_and_rag start=2025-01-01 end=2025-06-30 max=500
+2025-11-16 11:50:21,547 WARNING iron_condor_v3_1 - ollama_request failed: Expecting value: line 1 column 1 (char 0)
+2025-11-16 11:50:21,547 INFO iron_condor_v3_1 - AI unavailable — fallback to keep
+2025-11-16 11:50:21,547 INFO iron_condor_v3_1 - AI decision WPLAN_20250102T000000_cada8fc6dbaa -> {'confidence': 0.0, 'suggestion': 'keep', 'explanation': 'fallback', 'docs_used_count': 6}
+2025-11-16 11:50:21,588 INFO iron_condor_v3_1 - Executed WPLAN_20250102T000000_cada8fc6dbaa pnl=6452.50
+2025-11-16 11:50:21,598 DEBUG iron_condor_v3_1 - plan rejected 2025-01-03
+2025-11-16 11:50:26,964 WARNING iron_condor_v3_1 - ollama_request failed: Expecting value: line 1 column 1 (char 0)
+2025-11-16 11:50:26,965 INFO iron_condor_v3_1 - AI unavailable — fallback to keep
+2025-11-16 11:50:26,965 INFO iron_condor_v3_1 - AI decision WPLAN_20250109T000000_cc814f6c4548 -> {'confidence': 0.0, 'suggestion': 'keep', 'explanation': 'fallback', 'docs_used_count': 6}
+2025-11-16 11:50:26,969 INFO iron_condor_v3_1 - Executed WPLAN_20250109T000000_cc814f6c4548 pnl=6155.00
+2025-11-16 11:50:26,978 DEBUG iron_condor_v3_1 - plan rejected 2025-01-10
+2025-11-16 11:50:26,996 DEBUG iron_condor_v3_1 - plan rejected 2025-01-16
+2025-11-16 11:50:27,005 DEBUG iron_condor_v3_1 - plan rejected 2025-01-17
+2025-11-16 11:50:35,035 WARNING iron_condor_v3_1 - ollama_request failed: Expecting value: line 1 column 1 (char 0)
+2025-11-16 11:50:35,035 INFO iron_condor_v3_1 - AI unavailable — fallback to keep
+2025-11-16 11:50:35,036 INFO iron_condor_v3_1 - AI decision WPLAN_20250123T000000_01ff90d0eca1 -> {'confidence': 0.0, 'suggestion': 'keep', 'explanation': 'fallback', 'docs_used_count': 6}
+2025-11-16 11:50:35,038 INFO iron_condor_v3_1 - Executed WPLAN_20250123T000000_01ff90d0eca1 pnl=607.52
+2025-11-16 11:50:43,072 WARNING iron_condor_v3_1 - ollama_request failed: Expecting value: line 1 column 1 (char 0)
+2025-11-16 11:50:43,073 INFO iron_condor_v3_1 - AI unavailable — fallback to keep
+2025-11-16 11:50:43,073 INFO iron_condor_v3_1 - AI decision WPLAN_20250124T000000_f5fce228ccca -> {'confidence': 0.0, 'suggestion': 'keep', 'explanation': 'fallback', 'docs_used_count': 6}
+2025-11-16 11:50:43,075 INFO iron_condor_v3_1 - Executed WPLAN_20250124T000000_f5fce228ccca pnl=6482.50
+2025-11-16 11:50:51,051 WARNING iron_condor_v3_1 - ollama_request failed: Expecting value: line 1 column 1 (char 0)
+2025-11-16 11:50:51,051 INFO iron_condor_v3_1 - AI unavailable — fallback to keep
+2025-11-16 11:50:51,051 INFO iron_condor_v3_1 - AI decision WPLAN_20250130T000000_59ac80a458c7 -> {'confidence': 0.0, 'suggestion': 'keep', 'explanation': 'fallback', 'docs_used_count': 6}
+2025-11-16 11:50:51,053 INFO iron_condor_v3_1 - Executed WPLAN_20250130T000000_59ac80a458c7 pnl=7067.50
+2025-11-16 11:50:59,070 WARNING iron_condor_v3_1 - ollama_request failed: Expecting value: line 1 column 1 (char 0)
+2025-11-16 11:50:59,070 INFO iron_condor_v3_1 - AI unavailable — fallback to keep
+2025-11-16 11:50:59,070 INFO iron_condor_v3_1 - AI decision WPLAN_20250131T000000_095382726e27 -> {'confidence': 0.0, 'suggestion': 'keep', 'explanation': 'fallback', 'docs_used_count': 6}
+2025-11-16 11:50:59,072 INFO iron_condor_v3_1 - Executed WPLAN_20250131T000000_095382726e27 pnl=5457.50
+2025-11-16 11:50:59,082 DEBUG iron_condor_v3_1 - plan rejected 2025-02-06
+2025-11-16 11:51:06,166 WARNING iron_condor_v3_1 - ollama_request failed: Expecting value: line 1 column 1 (char 0)
+2025-11-16 11:51:06,166 INFO iron_condor_v3_1 - AI unavailable — fallback to keep
+2025-11-16 11:51:06,166 INFO iron_condor_v3_1 - AI decision WPLAN_20250207T000000_932e2da17f18 -> {'confidence': 0.0, 'suggestion': 'keep', 'explanation': 'fallback', 'docs_used_count': 6}
+2025-11-16 11:51:06,169 INFO iron_condor_v3_1 - Executed WPLAN_20250207T000000_932e2da17f18 pnl=2865.00
+2025-11-16 11:51:11,135 WARNING iron_condor_v3_1 - ollama_request failed: Expecting value: line 1 column 1 (char 0)
+2025-11-16 11:51:11,136 INFO iron_condor_v3_1 - AI unavailable — fallback to keep
+2025-11-16 11:51:11,136 INFO iron_condor_v3_1 - AI decision WPLAN_20250213T000000_66a272cf6e24 -> {'confidence': 0.0, 'suggestion': 'keep', 'explanation': 'fallback', 'docs_used_count': 6}
+2025-11-16 11:51:11,138 INFO iron_condor_v3_1 - Executed WPLAN_20250213T000000_66a272cf6e24 pnl=1625.00
+2025-11-16 11:51:17,879 WARNING iron_condor_v3_1 - ollama_request failed: Expecting value: line 1 column 1 (char 0)
+2025-11-16 11:51:17,879 INFO iron_condor_v3_1 - AI unavailable — fallback to keep
+2025-11-16 11:51:17,879 INFO iron_condor_v3_1 - AI decision WPLAN_20250214T000000_2056e3222a1c -> {'confidence': 0.0, 'suggestion': 'keep', 'explanation': 'fallback', 'docs_used_count': 6}
+2025-11-16 11:51:17,882 INFO iron_condor_v3_1 - Executed WPLAN_20250214T000000_2056e3222a1c pnl=6183.75
+2025-11-16 11:51:25,142 WARNING iron_condor_v3_1 - ollama_request failed: Expecting value: line 1 column 1 (char 0)
+2025-11-16 11:51:25,142 INFO iron_condor_v3_1 - AI unavailable — fallback to keep
+2025-11-16 11:51:25,142 INFO iron_condor_v3_1 - AI decision WPLAN_20250220T000000_5d15bef476db -> {'confidence': 0.0, 'suggestion': 'keep', 'explanation': 'fallback', 'docs_used_count': 6}
+2025-11-16 11:51:25,145 INFO iron_condor_v3_1 - Executed WPLAN_20250220T000000_5d15bef476db pnl=6179.99
+2025-11-16 11:51:25,154 DEBUG iron_condor_v3_1 - plan rejected 2025-02-21
+2025-11-16 11:51:33,187 WARNING iron_condor_v3_1 - ollama_request failed: Expecting value: line 1 column 1 (char 0)
+2025-11-16 11:51:33,187 INFO iron_condor_v3_1 - AI unavailable — fallback to keep
+2025-11-16 11:51:33,187 INFO iron_condor_v3_1 - AI decision WPLAN_20250227T000000_d8a35b79b94b -> {'confidence': 0.0, 'suggestion': 'keep', 'explanation': 'fallback', 'docs_used_count': 6}
+2025-11-16 11:51:33,190 INFO iron_condor_v3_1 - Executed WPLAN_20250227T000000_d8a35b79b94b pnl=11617.50
+2025-11-16 11:51:41,249 WARNING iron_condor_v3_1 - ollama_request failed: Expecting value: line 1 column 1 (char 0)
+2025-11-16 11:51:41,249 INFO iron_condor_v3_1 - AI unavailable — fallback to keep
+2025-11-16 11:51:41,249 INFO iron_condor_v3_1 - AI decision WPLAN_20250228T000000_ab9f83441b16 -> {'confidence': 0.0, 'suggestion': 'keep', 'explanation': 'fallback', 'docs_used_count': 6}
+2025-11-16 11:51:41,252 INFO iron_condor_v3_1 - Executed WPLAN_20250228T000000_ab9f83441b16 pnl=11617.50
+2025-11-16 11:51:49,236 WARNING iron_condor_v3_1 - ollama_request failed: Expecting value: line 1 column 1 (char 0)
+2025-11-16 11:51:49,236 INFO iron_condor_v3_1 - AI unavailable — fallback to keep
+2025-11-16 11:51:49,236 INFO iron_condor_v3_1 - AI decision WPLAN_20250306T000000_8638cb84f41e -> {'confidence': 0.0, 'suggestion': 'keep', 'explanation': 'fallback', 'docs_used_count': 6}
+2025-11-16 11:51:49,239 INFO iron_condor_v3_1 - Executed WPLAN_20250306T000000_8638cb84f41e pnl=11617.50
+2025-11-16 11:51:49,248 DEBUG iron_condor_v3_1 - plan rejected 2025-03-07
+2025-11-16 11:51:56,854 WARNING iron_condor_v3_1 - ollama_request failed: Expecting value: line 1 column 1 (char 0)
+2025-11-16 11:51:56,855 INFO iron_condor_v3_1 - AI unavailable — fallback to keep
+2025-11-16 11:51:56,855 INFO iron_condor_v3_1 - AI decision WPLAN_20250313T000000_153c846c1184 -> {'confidence': 0.0, 'suggestion': 'keep', 'explanation': 'fallback', 'docs_used_count': 6}
+2025-11-16 11:51:57,682 WARNING iron_condor_v3_1 - no underlying at expiry for WPLAN_20250313T000000_153c846c1184
+2025-11-16 11:51:57,685 DEBUG iron_condor_v3_1 - skip 2025-03-14 iv_pct=50.10060362173038 regime=False
+2025-11-16 11:52:04,373 WARNING iron_condor_v3_1 - ollama_request failed: Expecting value: line 1 column 1 (char 0)
+2025-11-16 11:52:04,373 INFO iron_condor_v3_1 - AI unavailable — fallback to keep
+2025-11-16 11:52:04,373 INFO iron_condor_v3_1 - AI decision WPLAN_20250320T000000_75e4f027a04c -> {'confidence': 0.0, 'suggestion': 'keep', 'explanation': 'fallback', 'docs_used_count': 6}
+2025-11-16 11:52:04,376 INFO iron_condor_v3_1 - Executed WPLAN_20250320T000000_75e4f027a04c pnl=1662.50
+2025-11-16 11:52:12,438 WARNING iron_condor_v3_1 - ollama_request failed: Expecting value: line 1 column 1 (char 0)
+2025-11-16 11:52:12,438 INFO iron_condor_v3_1 - AI unavailable — fallback to keep
+2025-11-16 11:52:12,438 INFO iron_condor_v3_1 - AI decision WPLAN_20250321T000000_845327fc1fdd -> {'confidence': 0.0, 'suggestion': 'keep', 'explanation': 'fallback', 'docs_used_count': 6}
+2025-11-16 11:52:12,441 INFO iron_condor_v3_1 - Executed WPLAN_20250321T000000_845327fc1fdd pnl=1515.00
+2025-11-16 11:52:12,450 DEBUG iron_condor_v3_1 - plan rejected 2025-03-27
+2025-11-16 11:52:20,491 WARNING iron_condor_v3_1 - ollama_request failed: Expecting value: line 1 column 1 (char 0)
+2025-11-16 11:52:20,491 INFO iron_condor_v3_1 - AI unavailable — fallback to keep
+2025-11-16 11:52:20,491 INFO iron_condor_v3_1 - AI decision WPLAN_20250328T000000_b7cc0a0e56a7 -> {'confidence': 0.0, 'suggestion': 'keep', 'explanation': 'fallback', 'docs_used_count': 6}
+2025-11-16 11:52:20,494 INFO iron_condor_v3_1 - Executed WPLAN_20250328T000000_b7cc0a0e56a7 pnl=2023.76
+2025-11-16 11:52:28,468 WARNING iron_condor_v3_1 - ollama_request failed: Expecting value: line 1 column 1 (char 0)
+2025-11-16 11:52:28,469 INFO iron_condor_v3_1 - AI unavailable — fallback to keep
+2025-11-16 11:52:28,469 INFO iron_condor_v3_1 - AI decision WPLAN_20250403T000000_c481fe8bf0bc -> {'confidence': 0.0, 'suggestion': 'keep', 'explanation': 'fallback', 'docs_used_count': 6}
+2025-11-16 11:52:28,471 INFO iron_condor_v3_1 - Executed WPLAN_20250403T000000_c481fe8bf0bc pnl=7067.50
+2025-11-16 11:52:28,479 DEBUG iron_condor_v3_1 - plan rejected 2025-04-04
+2025-11-16 11:52:28,483 DEBUG iron_condor_v3_1 - skip 2025-04-10 iv_pct=50.10060362173038 regime=False
+2025-11-16 11:52:28,492 DEBUG iron_condor_v3_1 - plan rejected 2025-04-11
+2025-11-16 11:52:28,502 DEBUG iron_condor_v3_1 - plan rejected 2025-04-17
+2025-11-16 11:52:28,504 DEBUG iron_condor_v3_1 - skip 2025-04-18 iv_pct=50.10060362173038 regime=False
+2025-11-16 11:52:28,514 DEBUG iron_condor_v3_1 - plan rejected 2025-04-24
+2025-11-16 11:52:32,926 WARNING iron_condor_v3_1 - ollama_request failed: Expecting value: line 1 column 1 (char 0)
+2025-11-16 11:52:32,926 INFO iron_condor_v3_1 - AI unavailable — fallback to keep
+2025-11-16 11:52:32,926 INFO iron_condor_v3_1 - AI decision WPLAN_20250425T000000_c44e8c395618 -> {'confidence': 0.0, 'suggestion': 'keep', 'explanation': 'fallback', 'docs_used_count': 6}
+2025-11-16 11:52:33,750 WARNING iron_condor_v3_1 - no underlying at expiry for WPLAN_20250425T000000_c44e8c395618
+2025-11-16 11:52:33,757 DEBUG iron_condor_v3_1 - skip 2025-05-01 iv_pct=50.10060362173038 regime=False
+2025-11-16 11:52:40,386 WARNING iron_condor_v3_1 - ollama_request failed: Expecting value: line 1 column 1 (char 0)
+2025-11-16 11:52:40,386 INFO iron_condor_v3_1 - AI unavailable — fallback to keep
+2025-11-16 11:52:40,386 INFO iron_condor_v3_1 - AI decision WPLAN_20250502T000000_b0cdc70d16aa -> {'confidence': 0.0, 'suggestion': 'keep', 'explanation': 'fallback', 'docs_used_count': 6}
+2025-11-16 11:52:40,400 INFO iron_condor_v3_1 - Executed WPLAN_20250502T000000_b0cdc70d16aa pnl=1585.00
+2025-11-16 11:52:46,008 WARNING iron_condor_v3_1 - ollama_request failed: Expecting value: line 1 column 1 (char 0)
+2025-11-16 11:52:46,008 INFO iron_condor_v3_1 - AI unavailable — fallback to keep
+2025-11-16 11:52:46,008 INFO iron_condor_v3_1 - AI decision WPLAN_20250508T000000_8e375debd1c0 -> {'confidence': 0.0, 'suggestion': 'keep', 'explanation': 'fallback', 'docs_used_count': 6}
+2025-11-16 11:52:46,043 INFO iron_condor_v3_1 - Executed WPLAN_20250508T000000_8e375debd1c0 pnl=13097.50
+2025-11-16 11:52:46,052 DEBUG iron_condor_v3_1 - plan rejected 2025-05-09
+2025-11-16 11:52:46,061 DEBUG iron_condor_v3_1 - plan rejected 2025-05-15
+2025-11-16 11:52:46,070 DEBUG iron_condor_v3_1 - plan rejected 2025-05-16
+2025-11-16 11:52:51,748 WARNING iron_condor_v3_1 - ollama_request failed: Expecting value: line 1 column 1 (char 0)
+2025-11-16 11:52:51,749 INFO iron_condor_v3_1 - AI unavailable — fallback to keep
+2025-11-16 11:52:51,749 INFO iron_condor_v3_1 - AI decision WPLAN_20250522T000000_0de46ab2d7b9 -> {'confidence': 0.0, 'suggestion': 'keep', 'explanation': 'fallback', 'docs_used_count': 6}
+2025-11-16 11:52:51,761 INFO iron_condor_v3_1 - Executed WPLAN_20250522T000000_0de46ab2d7b9 pnl=2818.75
+2025-11-16 11:52:51,769 DEBUG iron_condor_v3_1 - plan rejected 2025-05-23
+2025-11-16 11:52:51,780 DEBUG iron_condor_v3_1 - plan rejected 2025-05-29
+2025-11-16 11:52:57,116 WARNING iron_condor_v3_1 - ollama_request failed: Expecting value: line 1 column 1 (char 0)
+2025-11-16 11:52:57,116 INFO iron_condor_v3_1 - AI unavailable — fallback to keep
+2025-11-16 11:52:57,117 INFO iron_condor_v3_1 - AI decision WPLAN_20250530T000000_05e28b356476 -> {'confidence': 0.0, 'suggestion': 'keep', 'explanation': 'fallback', 'docs_used_count': 6}
+2025-11-16 11:52:57,152 INFO iron_condor_v3_1 - Executed WPLAN_20250530T000000_05e28b356476 pnl=2105.00
+2025-11-16 11:52:57,163 DEBUG iron_condor_v3_1 - plan rejected 2025-06-05
+2025-11-16 11:52:57,171 DEBUG iron_condor_v3_1 - plan rejected 2025-06-06
+2025-11-16 11:52:57,181 DEBUG iron_condor_v3_1 - plan rejected 2025-06-12
+2025-11-16 11:53:05,230 WARNING iron_condor_v3_1 - ollama_request failed: Expecting value: line 1 column 1 (char 0)
+2025-11-16 11:53:05,231 INFO iron_condor_v3_1 - AI unavailable — fallback to keep
+2025-11-16 11:53:05,231 INFO iron_condor_v3_1 - AI decision WPLAN_20250613T000000_f28ceb9c8628 -> {'confidence': 0.0, 'suggestion': 'keep', 'explanation': 'fallback', 'docs_used_count': 6}
+2025-11-16 11:53:05,242 INFO iron_condor_v3_1 - Executed WPLAN_20250613T000000_f28ceb9c8628 pnl=1185.00
+2025-11-16 11:53:05,252 DEBUG iron_condor_v3_1 - plan rejected 2025-06-19
+2025-11-16 11:53:05,261 DEBUG iron_condor_v3_1 - plan rejected 2025-06-20
+2025-11-16 11:53:05,271 DEBUG iron_condor_v3_1 - plan rejected 2025-06-26
+2025-11-16 11:53:05,279 DEBUG iron_condor_v3_1 - plan rejected 2025-06-27
+2025-11-16 11:53:05,280 INFO iron_condor_v3_1 - Run complete executed=22 skipped=2
+2025-11-16 11:53:05,281 INFO iron_condor_v3_1 - Executed trades=22 winpct=100.00
+2025-11-16 12:06:53,313 INFO iron_condor_v3_1 - Starting run_weekly_with_ai_and_rag start=2025-01-01 end=2025-06-30 max=500
+2025-11-16 12:07:07,560 INFO iron_condor_v3_1 - Starting run_weekly_with_ai_and_rag start=2025-01-01 end=2025-06-30 max=500

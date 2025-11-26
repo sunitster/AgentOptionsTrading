@@ -1,0 +1,46 @@
+{
+  "strategy": {
+    "direction": "bull",
+    "min_iv": 0.08,
+    "max_iv": 0.45,
+    "dte_min": 7,
+    "dte_max": 45,
+    "size_aggressiveness": 1.2
+  },
+  "meta": {
+    "strategy_parsed": {
+      "direction": "bull",
+      "min_iv": 0.08,
+      "max_iv": 0.45,
+      "dte_min": 7,
+      "dte_max": 45,
+      "moneyness_min": -999.0,
+      "moneyness_max": 999.0,
+      "size_aggressiveness": 1.2,
+      "iv_rank_threshold": null
+    },
+    "filters_applied": {
+      "min_iv": 0.08,
+      "max_iv": 0.45,
+      "dte_min": 7,
+      "dte_max": 45,
+      "direction": "bull"
+    },
+    "sizing_defaults_train": {
+      "size_scale": 1.4545949660771058,
+      "max_size": 50.0
+    },
+    "sizing_defaults_val": {
+      "size_scale": 1.4545949660771058,
+      "max_size": 50.0
+    },
+    "n_rows_after_filter": {
+      "train": 293273,
+      "val": 40274
+    }
+  },
+  "rmse": 0.5756761997376418,
+  "pnl": 17779.626639828894,
+  "n_trades": 40274,
+  "timestamp": 1763440150.5985446
+}

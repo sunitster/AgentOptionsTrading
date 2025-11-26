@@ -1,0 +1,30 @@
+{
+  "strategy": {
+    "direction": "bear",
+    "min_iv": 0.11289862277399854,
+    "max_iv": 0.4238484134582313,
+    "dte_min": 5,
+    "dte_max": 61,
+    "size_aggressiveness": 1.16766386391925
+  },
+  "meta": {
+    "applied_filters": {
+      "iv_range": [
+        0.11289862277399854,
+        0.4238484134582313
+      ],
+      "dte_range": [
+        5,
+        61
+      ],
+      "direction": "bear"
+    },
+    "feature_deltas": {
+      "size_aggressiveness": 1.16766386391925
+    }
+  },
+  "rmse": 0.6056110023572799,
+  "pnl": 75552.9663570481,
+  "n_trades": 108036,
+  "timestamp": 1763440902.6843953
+}

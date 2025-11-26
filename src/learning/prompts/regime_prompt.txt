@@ -1,0 +1,31 @@
+# -------------------------
+# file: prompts/regime_prompt.txt
+# -------------------------
+"""
+System: You are a careful trading regime model generator. You will receive a JSON array of daily records under <<PAST_DAYS>>. Each record contains features (iv, iv_delta, underlying_return, atr, skew, daily_pnl, etc.).
+
+
+Task: Propose up to 3 candidate rule-based regime models. For each candidate output a JSON object with the following keys:
+- name: short name
+- version: semantic version string
+- rules: a dict of named rule blocks; each block contains thresholds and actions
+- rationale: 1-2 sentence justification
+
+
+Output structure (strict JSON):
+{
+"candidates": [ { ...candidate... }, { ... } ]
+}
+
+
+Constraints:
+- Models must be conservative (avoid aggressive lever-ups)
+- Do not propose changes that would likely increase MaxDD
+- Provide numeric thresholds (not vague english)
+
+
+Now output only JSON.
+
+
+<<PAST_DAYS>>
+"""
