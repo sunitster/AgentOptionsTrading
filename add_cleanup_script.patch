@@ -1,0 +1,58 @@
+diff --git a/scripts/move_legacy_to_archive.sh b/scripts/move_legacy_to_archive.sh
+new file mode 100755
+index 0000000..1111111
+--- /dev/null
++++ b/scripts/move_legacy_to_archive.sh
+@@ -0,0 +1,160 @@
++#!/usr/bin/env bash
++set -euo pipefail
++
++# Safe archival script for AgentOptionsTrading
++ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
++ARCHIVE_DIR="${ROOT_DIR}/src/archive/legacy"
++
++mkdir -p "$ARCHIVE_DIR"
++
++# Files/folders to move (safe list)
++FILES_TO_MOVE=(
++  "src/bhavcopy_loader.py"
++  "src/data_loader.py"
++  "src/db.py"
++  "src/download_nifty.py"
++  "src/extract_chain_api.py"
++  "src/features.py"
++  "src/full_chain_rebuilder.py"
++  "src/iv_utils.py"
++  "src/option_loader.py"
++  "src/plot_feature_correlations.py"
++  "src/qc_report.py"
++  "src/snapshot_builder.py"
++  "src/test.py"
++  "src/test_features_coverage.py"
++  "src/test_feature_distribution.py"
++  "src/test_feature_drift.py"
++  "src/test_feature_null_breakdown.py"
++  "src/test_no_data_leakage.py"
++  "src/verify_bhavcopy_dates.py"
++  "src/verify_options_data.py"
++  "src/ai"
++  "src/apps/backtest_runner.py"
++  "src/apps/kite_historical_train.py"
++  "src/apps/cron"
++  "src/cli/agent.py"
++  "src/cli/agent_train.py"
++  "src/deploy/live_engine.py"
++  "src/deploy/model_registry.py"
++  "src/execution"
++  "src/learning/backfill_labels.py"
++  "src/learning/backfill_option_features.py"
++  "src/learning/build_daily_features.py"
++  "src/learning/llm_candidate_generator.py"
++  "src/learning/risk_engine.py"
++  "src/learning/run_full_historical_training.py"
++  "src/learning/signal_generator_unused.py"
++  "src/learning/strategy_adapter.py"
++  "src/learning/__init__ copy.py"
++  "src/learning/prompts"
++  "src/live/live_runner.py"
++  "src/live/p

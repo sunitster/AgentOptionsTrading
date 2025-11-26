@@ -1,0 +1,282 @@
+diff --git a/scripts/move_legacy_to_archive.sh b/scripts/move_legacy_to_archive.sh
+new file mode 100755
+index 0000000..1111111
+--- /dev/null
++++ b/scripts/move_legacy_to_archive.sh
+@@ -0,0 +1,176 @@
++#!/usr/bin/env bash
++#
++# Safe archival script for AgentOptionsTrading
++# Moves legacy / redundant files into src/archive/legacy/ using `git mv`
++# so git history is preserved. This script is intentionally conservative:
++#  - It creates the archive folder if missing
++#  - It checks each file exists before moving
++#  - It SKIPS refresh_token.py (explicitly preserved)
++#  - It prints what it would do, then performs moves after confirmation
++#
++# Usage:
++#   1) Review the file list below
++#   2) Run: ./scripts/move_legacy_to_archive.sh
++#   3) Commit the moves: git commit -m "archive: move legacy files to src/archive/legacy"
++#
++set -euo pipefail
++
++ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
++ARCHIVE_DIR="${ROOT_DIR}/src/archive/legacy"
++
++declare -a FILES_TO_MOVE=(
++  # root legacy files
++  "src/bhavcopy_loader.py"
++  "src/data_loader.py"
++  "src/db.py"
++  "src/download_nifty.py"
++  "src/extract_chain_api.py"
++  "src/features.py"
++  "src/full_chain_rebuilder.py"
++  "src/iv_utils.py"
++  "src/option_loader.py"
++  "src/plot_feature_correlations.py"
++  "src/qc_report.py"
++  "src/snapshot_builder.py"
++  "src/test.py"
++  "src/test_features_coverage.py"
++  "src/test_feature_distribution.py"
++  "src/test_feature_drift.py"
++  "src/test_feature_null_breakdown.py"
++  "src/test_no_data_leakage.py"
++  "src/verify_bhavcopy_dates.py"
++  "src/verify_options_data.py"
++
++  # ai folder (archive whole folder)
++  "src/ai"
++
++  # apps: keep only iron_condor_v4.py -> archive others
++  "src/apps/backtest_runner.py"
++  "src/apps/kite_historical_train.py"
++  "src/apps/cron/daily_training_job.py"
++
++  # cli: keep agent_trade.py -> archive others
++  "src/cli/agent.py"
++  "src/cli/agent_train.py"
++
++  # deploy: archive these (live is kept)
++  "src/deploy/live_engine.py"
++  "src/deploy/model_registry.py"
++
++  # execution folder - archive entire folder (script will map folder)
++  "src/execution"
++
++  # learning: archive specific legacy files (keep core ones)
++  "src/learning/backfill_labels.py"
++  "src/learning/backfill_option_features.py"
++  "src/learning/build_daily_features.py"
++  "src/learning/llm_candidate_generator.py"
++  "src/learning/risk_engine.py"
++  "src/learning/run_full_historical_training.py"
++  "src/learning/signal_generator_unused.py"
++  "src/learning/strategy_adapter.py"
++  "src/learning/__init__ copy.py"
++  "src/learning/prompts"
++
++  # live: archive duplicates / unused
++  "src/live/live_runner.py"
++  "src/live/paper_trading_engine.py"
++
++  # models: decision_types is optional - archive if you want (we'll archive)
++  "src/models/decision_types.py"
++
++  # scripts: keep unify_options_data.py -> archive others
++  "src/scripts/build_all_features.py"
++
++  # tests: archive entire tests folder
++  "src/tests"
++
++  # ui: dashboard.py duplicate
++  "src/ui/dashboard.py"
++)
++
++# Files that we will NOT touch even if listed above — explicit keepers.
++# refresh_token.py must be preserved per user's request.
++KEEP_EXPLICIT=(
++  "src/refresh_token.py"
++)
++
++echo "ROOT_DIR=${ROOT_DIR}"
++echo "ARCHIVE_DIR=${ARCHIVE_DIR}"
++echo
++echo "Files / folders proposed for archival (git mv -> ${ARCHIVE_DIR}):"
++for f in "${FILES_TO_MOVE[@]}"; do
++  printf "  - %s\n" "$f"
++done
++
++echo
++echo "Explicit KEEP list (won't be moved):"
++for k in "${KEEP_EXPLICIT[@]}"; do
++  printf "  - %s\n" "$k"
++done
++
++echo
++read -p "Proceed with moving these files to ${ARCHIVE_DIR}? (type YES to proceed): " CONFIRM
++if [ "${CONFIRM}" != "YES" ]; then
++  echo "Aborting. No files changed."
++  exit 0
++fi
++
++mkdir -p "${ARCHIVE_DIR}"
++
++# helper to move preserving path
++move_item() {
++  local item="$1"
++  # if the item is a directory
++  if [ -d "${ROOT_DIR}/${item}" ]; then
++    echo "Moving directory: ${item} -> ${ARCHIVE_DIR}/"
++    git mv "${ROOT_DIR}/${item}" "${ARCHIVE_DIR}/" || {
++      echo "git mv failed for directory ${item}. Trying fallback (cp + rm)."
++      mkdir -p "${ARCHIVE_DIR}/$(dirname "${item}")"
++      cp -a "${ROOT_DIR}/${item}" "${ARCHIVE_DIR}/"
++      rm -rf "${ROOT_DIR:?}/${item}"
++    }
++    return
++  fi
++
++  # if item is a file or pattern
++  if [ -f "${ROOT_DIR}/${item}" ]; then
++    # skip explicit keepers
++    for k in "${KEEP_EXPLICIT[@]}"; do
++      if [ "${ROOT_DIR}/${k}" = "${ROOT_DIR}/${item}" ]; then
++        echo "Skipping (explicit keep): ${item}"
++        return
++      fi
++    done
++    mkdir -p "${ARCHIVE_DIR}/$(dirname "${item}")"
++    echo "Moving file: ${item} -> ${ARCHIVE_DIR}/${item}"
++    git mv "${ROOT_DIR}/${item}" "${ARCHIVE_DIR}/${item}" || {
++      echo "git mv failed for ${item}. Trying fallback (cp + rm)."
++      cp -a "${ROOT_DIR}/${item}" "${ARCHIVE_DIR}/${item}"
++      rm -f "${ROOT_DIR:?}/${item}"
++    }
++    return
++  fi
++
++  # support glob-like entries for files that may not exist
++  if compgen -G "${ROOT_DIR}/${item}*" > /dev/null; then
++    for matched in ${ROOT_DIR}/${item}*; do
++      rel="${matched#$ROOT_DIR/}"
++      # skip keepers
++      skip=false
++      for k in "${KEEP_EXPLICIT[@]}"; do
++        if [ "${rel}" = "${k}" ]; then
++          echo "Skipping (explicit keep): ${rel}"
++          skip=true
++          break
++        fi
++      done
++      [ "${skip}" = "true" ] && continue
++      mkdir -p "${ARCHIVE_DIR}/$(dirname "${rel}")"
++      echo "Moving matched: ${rel} -> ${ARCHIVE_DIR}/${rel}"
++      git mv "${matched}" "${ARCHIVE_DIR}/${rel}" || {
++        cp -a "${matched}" "${ARCHIVE_DIR}/${rel}"
++        rm -rf "${matched}"
++      }
++    done
++    return
++  fi
++
++  echo "Not found (skipping): ${item}"
++}
++
++# iterate and move
++for item in "${FILES_TO_MOVE[@]}"; do
++  # if the item is in KEEP_EXPLICIT skip
++  skip=false
++  for k in "${KEEP_EXPLICIT[@]}"; do
++    if [ "${item}" = "${k}" ]; then
++      echo "Skipping (explicit keeper): ${item}"
++      skip=true
++      break
++    fi
++  done
++  [ "${skip}" = "true" ] && continue
++  move_item "${item}"
++done
++
++echo
++echo "Done. Review 'git status' and commit the changes when ready:"
++echo "  git status --porcelain"
++echo "  git add -A"
++echo "  git commit -m \"archive: move legacy files to src/archive/legacy\""
++echo
++echo "If anything moved that you want restored, you can undo before commit with:"
++echo "  git mv -k src/archive/legacy/<path> <original-path>"
++
++exit 0
++
+diff --git a/docs/CLEANUP_ARCHIVE_README.md b/docs/CLEANUP_ARCHIVE_README.md
+new file mode 100644
+index 0000000..2222222
+--- /dev/null
++++ b/docs/CLEANUP_ARCHIVE_README.md
+@@ -0,0 +1,160 @@
++# Archive / Cleanup instructions — AgentOptionsTrading
++
++This file explains the safe archival process and the script added at:
++
++  `scripts/move_legacy_to_archive.sh`
++
++### Goal
++
++Safely archive legacy and redundant source files into `src/archive/legacy/` while preserving git history by using `git mv`. This is non-destructive: nothing is permanently deleted until you commit the moves. `refresh_token.py` is explicitly preserved by the script.
++
++### What the script does
++
++- Lists a conservative set of files/folders that are considered legacy (backfill, old tests, duplicate modules).
++- Asks for explicit confirmation (`type YES`) before performing any moves.
++- For each file / folder it:
++  - uses `git mv` to move the path into `src/archive/legacy/<original-relative-path>` (preserves history).
++  - if `git mv` fails it falls back to `cp` + `rm` (less ideal).
++- Skips `src/refresh_token.py` and any other explicit keepers.
++
++### Why we archive rather than delete
++
++1. Preserves git history: `git mv` keeps commits linked to file movement.
++2. Safe rollback: you can restore specific files easily before commit if needed.
++3. Allows manual inspection and selective restore.
++
++### After running
++
++Run:
++
++```bash
++git status --porcelain
++git add -A
++git commit -m "archive: move legacy files to src/archive/legacy"
++```
++
++If you find you moved something by mistake before committing:
++
++```bash
++git mv src/archive/legacy/path/to/file.py src/path/to/file.py
++```
++
++### Files intentionally preserved
++
++- `src/refresh_token.py` (explicit keeper as requested)
++- Keep the files required for the live/paper engine:
++  - `src/live/*` (kite_api.py, kite_data.py, live_paper_engine.py, paper_broker.py)
++  - `src/trading/*` (iron_condor_builder.py, signal_generator.py)
++  - `src/cli/agent_trade.py`
++  - `src/apps/iron_condor_v4.py` (history/backtest)
++  - `src/engine/*` and `src/monitoring/observability.py` (core)
++
++### If you want a one-step removal
++
++After you confirm archived files are safe and committed, you can delete the `src/archive/legacy/` directory in a future commit (if you really want them out of the repo), or keep them as an on-repo archive for traceability.
++
++### Notes
++
++- The script is intentionally conservative. It should be reviewed and run locally.
++- If you want me to produce a direct `git rm` patch instead (destructive), say so explicitly — but I recommend keeping this safer archival flow.
++
++---
++Generated by ChatGPT (cleanup helper)
++
