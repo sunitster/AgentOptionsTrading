@@ -1,4 +1,0 @@
-{"timestamp": 1763444625.8143458, "event_type": "obs_init", "payload": {"run_id": "run_1763444625"}}
-{"timestamp": 1763444625.814471, "event_type": "main_start", "payload": {"run_id": "run_1763444625"}}
-{"timestamp": 1763444626.0116496, "event_type": "latency", "payload": {"label": "load_features", "elapsed_sec": 0.19710040092468262}}
-{"timestamp": 1763444626.0117393, "event_type": "features_loaded", "payload": {"shape": [2695842, 26]}}

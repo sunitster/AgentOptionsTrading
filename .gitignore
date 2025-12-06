@@ -15,3 +15,26 @@ data/
 # Config files
 config/config.yaml
 config/*.yaml
+
+# Logs
+logs/
+*.log
+*.jsonl
+*.csv
+
+# Databases and big local files
+*.db
+*.pkl
+
+# Temporary / debug files
+tmp_view.json
+
+# Model files
+models/llm_trades/*.json
+models/llm_trades/*.csv
+models/llm_trades/*.db
+models/llm_trades/model.pkl
+models/llm_trades/model_weights.json
+models/llm_trades/recovered_position.json
+models/llm_trades/records.jsonl
+models/llm_trades/debug_snapshot.json
