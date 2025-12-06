@@ -9,8 +9,7 @@
 //   risk_state: {...},
 //   current_position: {...},
 //   ltp_times: [...],
-//   ltp_prices: [...],
-//   ml: { available: bool, eval: { p_win, expected_pnl, top_features, score } }
+//   ltp_prices: [...]
 // }
 
 (function () {
@@ -340,48 +339,6 @@
     }
   }
 
-  // -------------------- ML rendering --------------------
-  function renderML(ml) {
-    try {
-      const mlScoreEl = document.getElementById("ml-score");
-      const mlPwinEl = document.getElementById("ml-pwin");
-      const mlExplainEl = document.getElementById("ml-explain");
-      if (!mlScoreEl || !mlPwinEl || !mlExplainEl) return;
-
-      if (!ml || !ml.available) {
-        mlScoreEl.textContent = "No model";
-        mlPwinEl.textContent = "p_win: —";
-        mlExplainEl.textContent = "ML model not available on server.";
-        return;
-      }
-
-      const evaln = ml.eval || {};
-      const score = evaln.score != null ? Number(evaln.score).toFixed(3) : "—";
-      const pwin = evaln.p_win != null ? (Number(evaln.p_win) * 100).toFixed(1) + "%" : "—";
-      const ep = evaln.expected_pnl != null ? "₹" + Number(evaln.expected_pnl).toFixed(2) : "—";
-
-      mlScoreEl.textContent = score;
-      mlPwinEl.textContent = `p_win: ${pwin} | exp pnl: ${ep}`;
-
-      // build explanation text
-      let txt = "";
-      if (evaln.top_features && evaln.top_features.length) {
-        txt += "Top feature contributions (approx):\n";
-        evaln.top_features.forEach((f) => {
-          // defensive: ensure numeric formatting
-          const contrib = Number(f.contrib || 0).toFixed(3);
-          txt += ` • ${f.feature}: ${contrib}\n`;
-        });
-      } else {
-        txt += "No feature contributions available.\n";
-      }
-      txt += `\nRaw score: ${score}\n`;
-      mlExplainEl.textContent = txt;
-    } catch (e) {
-      console.error("renderML", e);
-    }
-  }
-
   // -------------------- LTP history helper --------------------
   function appendLtpPoint(spot, ts) {
     try {
@@ -515,6 +472,7 @@
 
         // Extra renders (ATM, IC, Greeks, Margin, Heatmap, LTP) using safe adapters
         try {
+          // ATM: we don't compute here; let the UI keep showing placeholder or we can compute via snapshot if desired
           renderATM({ atm: null, count_strikes: 0, underlying: null });
         } catch (e) {}
         try {
@@ -536,14 +494,6 @@
           // render LTP chart with snapshot (the function is defensive)
           renderLTPChart({ snapshot: snapshot });
         } catch (e) {}
-
-        // ML block rendering (defensive)
-        try {
-          renderML(payload.ml || {});
-        } catch (e) {
-          console.error("renderML call failed", e);
-        }
-
         // update last-update UI (index.html shows server time via renderState)
         const lastUpdateEl = document.getElementById("last-update");
         if (lastUpdateEl) lastUpdateEl.textContent = new Date().toLocaleString();

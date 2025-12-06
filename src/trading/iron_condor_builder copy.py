@@ -13,26 +13,18 @@ def _mid_price(row: pd.Series) -> float:
     Helper to compute a reasonable price for an option row.
     Prefers 'ltp', else mid of 'best_bid'/'best_ask'.
     """
-    if row is None:
-        return float("nan")
-    try:
-        if "ltp" in row and pd.notna(row["ltp"]):
-            return float(row["ltp"])
-    except Exception:
-        pass
+    if "ltp" in row and pd.notna(row["ltp"]):
+        return float(row["ltp"])
 
-    try:
-        bid = float(row["best_bid"]) if "best_bid" in row and pd.notna(row["best_bid"]) else np.nan
-        ask = float(row["best_ask"]) if "best_ask" in row and pd.notna(row["best_ask"]) else np.nan
+    bid = float(row["best_bid"]) if "best_bid" in row and pd.notna(row["best_bid"]) else np.nan
+    ask = float(row["best_ask"]) if "best_ask" in row and pd.notna(row["best_ask"]) else np.nan
 
-        if np.isfinite(bid) and np.isfinite(ask):
-            return (bid + ask) / 2.0
-        if np.isfinite(bid):
-            return bid
-        if np.isfinite(ask):
-            return ask
-    except Exception:
-        pass
+    if np.isfinite(bid) and np.isfinite(ask):
+        return (bid + ask) / 2.0
+    if np.isfinite(bid):
+        return bid
+    if np.isfinite(ask):
+        return ask
 
     return np.nan
 
@@ -45,8 +37,7 @@ class IronCondor:
 
     NOTE:
     - Prices stored on the object are treated as *entry prices*.
-    - We optionally carry real tradingsymbols for each leg so engine
-      and paper broker can use exact exchange symbols.
+    - MTM and exit PnL are computed from a fresh option chain snapshot.
     """
 
     symbol: str
@@ -64,12 +55,6 @@ class IronCondor:
 
     lot_size: int = 25
     size_aggressiveness: float = 1.0
-
-    # NEW: optional real tradingsymbols for legs (Zerodha / exchange format)
-    short_put_sym: Optional[str] = None
-    long_put_sym: Optional[str] = None
-    short_call_sym: Optional[str] = None
-    long_call_sym: Optional[str] = None
 
     # ---------------------------
     # Derived properties
@@ -119,33 +104,13 @@ class IronCondor:
     @property
     def max_loss(self) -> float:
         """
-        Correct max loss calculation for an iron condor.
-        max_loss = max(put_width, call_width) * lot_size
+        Theoretical max loss (per spread) at expiry on one side.
+
+        For a symmetric IC:
+            max_loss_per_unit = width - entry_credit
         """
-        try:
-            call_width = None
-            put_width = None
-
-            if self.long_call is not None and self.short_call is not None:
-                call_width = float(self.long_call) - float(self.short_call)
-
-            if self.long_put is not None and self.short_put is not None:
-                put_width = float(self.short_put) - float(self.long_put)
-
-            # Filter valid positive widths
-            widths = [w for w in (call_width, put_width) if w is not None and w > 0]
-
-            if not widths:
-                # fallback instead of 0
-                return float(self.width * self.lot_size)
-
-            max_w = max(widths)
-            return float(max_w * int(self.lot_size))
-
-        except Exception:
-            # safe fallback
-            return float(self.width * self.lot_size)
-
+        loss_per_unit = max(self.width - self.entry_credit, 0.0)
+        return loss_per_unit * self.lot_size * self.n_lots
 
     # ---------------------------
     # Serialization helpers
@@ -166,36 +131,85 @@ class IronCondor:
     def from_dict(cls, payload: Dict[str, Any]) -> "IronCondor":
         """
         Safe constructor from a dict previously produced by `to_dict()` or any compatible dict.
-        Accepts optional leg symbol fields.
+
+        - Accepts extra/legacy keys.
+        - Coerces numeric types.
+        - Fills missing fields with sensible defaults where possible and raises only if symbol/legs absent.
         """
         if payload is None:
             raise ValueError("payload is None")
 
+        # Allow nested dicts with different key names (compatibility)
         def _pick(*keys, default=None):
             for k in keys:
                 if k in payload and payload[k] is not None:
                     return payload[k]
             return default
 
+        # required: symbol and leg strikes/prices
         symbol = _pick("symbol", "ticker", "underlying")
         expiry = _pick("expiry", "exp", None)
 
+        # leg strikes
         sp = _pick("short_put", "shortPut", "sp", None)
         lp = _pick("long_put", "longPut", "lp", None)
         sc = _pick("short_call", "shortCall", "sc", None)
         lc = _pick("long_call", "longCall", "lc", None)
 
+        # leg prices - support multiple legacy keys
         spp = _pick("short_put_price", "shortPutPrice", "short_put_px", "short_put_p", None)
         lpp = _pick("long_put_price", "longPutPrice", "long_put_px", "long_put_p", None)
         scp = _pick("short_call_price", "shortCallPrice", "short_call_px", "short_call_p", None)
         lcp = _pick("long_call_price", "longCallPrice", "long_call_px", "long_call_p", None)
 
-        # optional real tradingsymbols
-        sps = _pick("short_put_sym", "shortPutSymbol", "short_put_symbol", None)
-        lps = _pick("long_put_sym", "longPutSymbol", "long_put_symbol", None)
-        scs = _pick("short_call_sym", "shortCallSymbol", "short_call_symbol", None)
-        lcs = _pick("long_call_sym", "longCallSymbol", "long_call_symbol", None)
+        # fallback to trying to extract from nested "legs" if present
+        if any(v is None for v in (sp, lp, sc, lc)):
+            legs = payload.get("legs") or payload.get("leg_info") or None
+            if isinstance(legs, (list, tuple)) and len(legs) >= 4:
+                try:
+                    # attempt to map by option_type presence or order
+                    # find PE and CE legs by option_type or by string symbol keys
+                    made = {"PE": [], "CE": []}
+                    for l in legs:
+                        try:
+                            opt = None
+                            if isinstance(l, dict):
+                                opt = l.get("option_type") or l.get("opt") or None
+                                strike = l.get("strike") or l.get("strike_pr") or l.get("strike_val") or None
+                                px = l.get("price") or l.get("ltp") or l.get("last_price") or None
+                            else:
+                                opt = getattr(l, "option_type", None) if hasattr(l, "option_type") else None
+                                strike = getattr(l, "strike", None) if hasattr(l, "strike") else None
+                                px = None
+                            if opt and str(opt).upper() in ("PE", "CE"):
+                                made[str(opt).upper()].append((strike, px, l))
+                        except Exception:
+                            continue
+                    # best-effort mapping
+                    if made["PE"] and len(made["PE"]) >= 2:
+                        # sort by strike ascending => lower = long_put, higher = short_put
+                        pe_sorted = sorted([ (float(s[0]) if s[0] is not None else np.nan, s[1]) for s in made["PE"] ], key=lambda x: x[0] if not np.isnan(x[0]) else 1e12)
+                        # assign long_put = smallest, short_put = next
+                        try:
+                            lp = float(pe_sorted[0][0]) if not np.isnan(pe_sorted[0][0]) else lp
+                            sp = float(pe_sorted[1][0]) if not np.isnan(pe_sorted[1][0]) else sp
+                            lpp = lpp or (float(pe_sorted[0][1]) if pe_sorted[0][1] is not None else lpp)
+                            spp = spp or (float(pe_sorted[1][1]) if pe_sorted[1][1] is not None else spp)
+                        except Exception:
+                            pass
+                    if made["CE"] and len(made["CE"]) >= 2:
+                        ce_sorted = sorted([ (float(s[0]) if s[0] is not None else np.nan, s[1]) for s in made["CE"] ], key=lambda x: x[0] if not np.isnan(x[0]) else 1e12)
+                        try:
+                            sc = float(ce_sorted[0][0]) if not np.isnan(ce_sorted[0][0]) else sc
+                            lc = float(ce_sorted[1][0]) if not np.isnan(ce_sorted[1][0]) else lc
+                            scp = scp or (float(ce_sorted[0][1]) if ce_sorted[0][1] is not None else scp)
+                            lcp = lcp or (float(ce_sorted[1][1]) if ce_sorted[1][1] is not None else lcp)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
 
+        # final checks for strikes/prices
         def _to_float(x, default=0.0):
             try:
                 return float(x) if x is not None else default
@@ -205,6 +219,7 @@ class IronCondor:
         if symbol is None:
             raise ValueError("Cannot construct IronCondor: missing 'symbol' in payload")
 
+        # Use fallback sensible defaults if prices missing (0.0). The engine will risk-check later.
         return cls(
             symbol=str(symbol),
             expiry=(str(expiry) if expiry is not None else None),
@@ -218,10 +233,6 @@ class IronCondor:
             long_call_price=_to_float(lcp, 0.0),
             lot_size=int(_to_float(payload.get("lot_size", payload.get("lots", 25)), 25)),
             size_aggressiveness=float(_to_float(payload.get("size_aggressiveness", payload.get("n_lots", 1.0)), 1.0)),
-            short_put_sym=(str(sps) if sps is not None else None),
-            long_put_sym=(str(lps) if lps is not None else None),
-            short_call_sym=(str(scs) if scs is not None else None),
-            long_call_sym=(str(lcs) if lcs is not None else None),
         )
 
     # ---------------------------
@@ -244,63 +255,38 @@ class IronCondor:
         chain_df: pd.DataFrame,
         strike_val: float,
         opt_type: str,  # 'CE' / 'PE'
-        prefer_symbol: Optional[str] = None,
     ) -> Optional[pd.Series]:
-        """
-        Find a leg row in chain_df. Preference order:
-         1) If prefer_symbol provided -> match row.tradingsymbol == prefer_symbol
-         2) Otherwise match by strike & option_type.
-        """
-        if chain_df is None or chain_df.empty:
+        df = chain_df.copy()
+        df.columns = [c.lower() for c in df.columns]
+
+        if "option_type" not in df.columns and "option_typ" in df.columns:
+            df["option_type"] = df["option_typ"]
+
+        if "strike" not in df.columns and "strike_pr" in df.columns:
+            df["strike"] = df["strike_pr"]
+
+        # ensure option_type exists
+        if "option_type" not in df.columns:
             return None
 
-        df = chain_df.copy()
-        cols_lower = [c.lower() for c in df.columns]
-        df.columns = cols_lower
-
-        # try tradingsymbol match first
-        try:
-            if prefer_symbol:
-                mask = df.get("tradingsymbol", df.get("tradingsymbol".lower(), pd.Series([]))) == prefer_symbol
-                # if column present may be case sensitive; ensure string compare
-                if "tradingsymbol" in df.columns:
-                    match = df[df["tradingsymbol"].astype(str) == str(prefer_symbol)]
-                    if not match.empty:
-                        return match.iloc[0]
-        except Exception:
-            pass
-
-        # fallback to strike + option_type
-        try:
-            if "strike" not in df.columns and "strike_pr" in df.columns:
-                df["strike"] = df["strike_pr"]
-            if "option_type" not in df.columns and "option_typ" in df.columns:
-                df["option_type"] = df["option_typ"]
-
-            if "strike" in df.columns and "option_type" in df.columns:
-                mask = (
-                    (df["strike"].astype(float) == float(strike_val)) &
-                    (df["option_type"].str.upper() == opt_type.upper())
-                )
-                leg = df[mask]
-                if not leg.empty:
-                    return leg.iloc[0]
-        except Exception:
-            pass
-
-        return None
+        mask = (
+            (df["strike"].astype(float) == float(strike_val)) &
+            (df["option_type"].str.upper() == opt_type.upper())
+        )
+        leg = df[mask]
+        if leg.empty:
+            return None
+        return leg.iloc[0]
 
     # ---------------------------
     # Orders
     # ---------------------------
-    def entry_orders(self, chain_df: Optional[pd.DataFrame] = None):
+    def entry_orders(self):
         """
-        Build order dicts PaperBroker expects:
-        If chain_df provided, prefer real tradingsymbols stored on the object
-        or found by looking up chain_df. Otherwise fallback to legacy formatted symbols.
+        Build simple order dicts PaperBroker expects:
+        {symbol, qty, side, price}
 
-        Returns list:
-            {"symbol": <tradingsymbol>, "qty": int, "side": "BUY"|"SELL", "price": float}
+        Note: qty returned is a positive integer; side indicates BUY/SELL.
         """
         num_lots = self._lots_int()
         if num_lots <= 0:
@@ -309,64 +295,43 @@ class IronCondor:
         qty = num_lots * self.lot_size
 
         def fmt_strike(s):
+            # prefer integer visibly (19250 instead of 19250.0)
             try:
                 si = int(round(float(s)))
                 return str(si)
             except Exception:
                 return str(s)
 
-        # helper to resolve symbol for a leg
-        def resolve_leg_symbol(preferred_sym: Optional[str], strike_val: float, opt_type: str):
-            # 1) explicit stored symbol on object
-            if preferred_sym:
-                return preferred_sym
-            # 2) look up chain_df by strike & option_type
-            try:
-                if chain_df is not None and not chain_df.empty:
-                    row = self._find_leg_row(chain_df, strike_val, opt_type, prefer_symbol=None)
-                    if row is not None and "tradingsymbol" in row.index and row["tradingsymbol"]:
-                        return str(row["tradingsymbol"])
-            except Exception:
-                pass
-            # 3) fallback legacy formatting
-            return f"{self.symbol}_{opt_type.upper()}_{fmt_strike(strike_val)}"
-
-        sp_sym = resolve_leg_symbol(self.short_put_sym, self.short_put, "PE")
-        lp_sym = resolve_leg_symbol(self.long_put_sym, self.long_put, "PE")
-        sc_sym = resolve_leg_symbol(self.short_call_sym, self.short_call, "CE")
-        lc_sym = resolve_leg_symbol(self.long_call_sym, self.long_call, "CE")
-
-        orders = [
+        return [
             # Short put (SELL)
             {
-                "symbol": sp_sym,
+                "symbol": f"{self.symbol}_PE_{fmt_strike(self.short_put)}",
                 "qty": int(qty),
                 "side": "SELL",
                 "price": float(self.short_put_price),
             },
             # Long put (BUY)
             {
-                "symbol": lp_sym,
+                "symbol": f"{self.symbol}_PE_{fmt_strike(self.long_put)}",
                 "qty": int(qty),
                 "side": "BUY",
                 "price": float(self.long_put_price),
             },
             # Short call (SELL)
             {
-                "symbol": sc_sym,
+                "symbol": f"{self.symbol}_CE_{fmt_strike(self.short_call)}",
                 "qty": int(qty),
                 "side": "SELL",
                 "price": float(self.short_call_price),
             },
             # Long call (BUY)
             {
-                "symbol": lc_sym,
+                "symbol": f"{self.symbol}_CE_{fmt_strike(self.long_call)}",
                 "qty": int(qty),
                 "side": "BUY",
                 "price": float(self.long_call_price),
             },
         ]
-        return orders
 
     # ---------------------------
     # Real-life PnL computation
@@ -376,22 +341,14 @@ class IronCondor:
         chain_df: pd.DataFrame,
         strike_val: float,
         opt_type: str,
-        prefer_symbol: Optional[str] = None,
     ) -> Optional[float]:
-        # Prefer matching by tradingsymbol if available on object
-        try:
-            if prefer_symbol:
-                row = self._find_leg_row(chain_df, strike_val, opt_type, prefer_symbol=prefer_symbol)
-            else:
-                row = self._find_leg_row(chain_df, strike_val, opt_type, prefer_symbol=None)
-            if row is None:
-                return None
-            px = _mid_price(row)
-            if np.isnan(px):
-                return None
-            return float(px)
-        except Exception:
+        row = self._find_leg_row(chain_df, strike_val, opt_type)
+        if row is None:
             return None
+        px = _mid_price(row)
+        if np.isnan(px):
+            return None
+        return float(px)
 
     def mark_to_market(self, chain_df: pd.DataFrame) -> float:
         """
@@ -408,11 +365,11 @@ class IronCondor:
         if qty <= 0:
             return 0.0
 
-        # Current prices (prefer real leg symbol if present)
-        sp_cur = self._current_leg_price(chain_df, self.short_put, "PE", prefer_symbol=self.short_put_sym)
-        lp_cur = self._current_leg_price(chain_df, self.long_put, "PE", prefer_symbol=self.long_put_sym)
-        sc_cur = self._current_leg_price(chain_df, self.short_call, "CE", prefer_symbol=self.short_call_sym)
-        lc_cur = self._current_leg_price(chain_df, self.long_call, "CE", prefer_symbol=self.long_call_sym)
+        # Current prices
+        sp_cur = self._current_leg_price(chain_df, self.short_put, "PE")
+        lp_cur = self._current_leg_price(chain_df, self.long_put, "PE")
+        sc_cur = self._current_leg_price(chain_df, self.short_call, "CE")
+        lc_cur = self._current_leg_price(chain_df, self.long_call, "CE")
 
         if any(p is None for p in (sp_cur, lp_cur, sc_cur, lc_cur)):
             # If any leg cannot be priced, better to not fake anything.
@@ -444,11 +401,15 @@ class IronCondor:
     def expiry_pnl(self, spot_expiry: float) -> float:
         """
         Settlement PnL at expiry if all legs are held till expiry.
+
+        Uses intrinsic values for each leg and the stored entry prices.
+        Does not model brokerage, STT, or physical settlement nuances.
         """
         qty = self._leg_qty()
         if qty <= 0:
             return 0.0
 
+        # Intrinsic values at expiry
         def intrinsic_call(spot: float, strike: float) -> float:
             return max(spot - strike, 0.0)
 
@@ -460,11 +421,13 @@ class IronCondor:
         sc_intr = intrinsic_call(spot_expiry, self.short_call)
         lc_intr = intrinsic_call(spot_expiry, self.long_call)
 
+        # Quantities (positive=long, negative=short)
         q_sp = -qty
         q_lp = qty
         q_sc = -qty
         q_lc = qty
 
+        # Use intrinsic as "current price"
         pnl_sp = q_sp * (sp_intr - self.short_put_price)
         pnl_lp = q_lp * (lp_intr - self.long_put_price)
         pnl_sc = q_sc * (sc_intr - self.short_call_price)
@@ -474,6 +437,13 @@ class IronCondor:
         return float(total_pnl)
 
     def simulated_pnl(self, chain_df: Optional[pd.DataFrame] = None) -> float:
+        """
+        Backwards-compatible shim.
+
+        - NEW: if chain_df is provided, returns real MTM PnL.
+        - OLD: if called without data (legacy code), returns 0.0 to avoid
+          lying about PnL.
+        """
         if chain_df is None:
             return 0.0
         return self.mark_to_market(chain_df)
@@ -486,12 +456,25 @@ def build_iron_condor(
     lot_size: int = 25,
     size_aggressiveness: float = 1.0,
     expiry: Optional[str] = None,
+    # NEW optional args for forward compatibility:
     spot: Optional[float] = None,
-    **kwargs,
+    lots_per_leg: int = 1,  # kept for signature compatibility; we use size_aggressiveness instead.
+    **kwargs,     # swallow unused arguments safely
 ) -> Optional[IronCondor]:
     """
     Build a *symmetric* Iron Condor around ATM using a full option chain.
-    Returns IronCondor with optional real leg symbols when found in chain_df.
+
+    Assumptions:
+    - chain_df has columns: 'strike', 'option_type' ('CE'/'PE'), 'expiry',
+      and at least one of 'ltp' or ('best_bid', 'best_ask').
+    - We construct:
+        short_put  = ATM - width
+        long_put   = ATM - 2*width
+        short_call = ATM + width
+        long_call  = ATM + 2*width
+
+    Returns:
+        IronCondor or None if suitable strikes are missing.
     """
     if chain_df is None or chain_df.empty:
         return None
@@ -507,6 +490,7 @@ def build_iron_condor(
 
     required_cols = {"strike", "option_type", "expiry"}
     if not required_cols.issubset(set(df.columns)):
+        # Not enough info to build structure
         return None
 
     # Choose expiry
@@ -516,6 +500,7 @@ def build_iron_condor(
     if df.empty:
         return None
 
+    # Allow engine-supplied spot to override
     if spot is None:
         if "spot" in df.columns and df["spot"].notna().any():
             spot = float(df["spot"].dropna().iloc[0])
@@ -524,22 +509,28 @@ def build_iron_condor(
     strikes = np.sort(strikes)
 
     if spot is None:
+        # Fallback: approximate ATM as middle of strikes
         atm_strike = float(strikes[len(strikes) // 2])
     else:
+        # Pick strike closest to spot
         idx = np.argmin(np.abs(strikes - spot))
         atm_strike = float(strikes[idx])
 
+    # Define desired structure (symmetric IC)
     short_put = atm_strike - width
     long_put = atm_strike - 2 * width
     short_call = atm_strike + width
     long_call = atm_strike + 2 * width
 
+    # Helper to grab the row for a specific leg
     def find_leg(strike_val: float, opt_type: str) -> Optional[pd.Series]:
-        cond = (df["strike"].astype(float) == float(strike_val)) & (df["option_type"].str.upper() == opt_type)
-        tmp = df[cond]
-        if tmp.empty:
+        leg = df[
+            (df["strike"].astype(float) == float(strike_val)) &
+            (df["option_type"].str.upper() == opt_type)
+        ]
+        if leg.empty:
             return None
-        return tmp.iloc[0]
+        return leg.iloc[0]
 
     sp_row = find_leg(short_put, "PE")
     lp_row = find_leg(long_put, "PE")
@@ -547,6 +538,7 @@ def build_iron_condor(
     lc_row = find_leg(long_call, "CE")
 
     if any(r is None for r in (sp_row, lp_row, sc_row, lc_row)):
+        # Missing some strikes – can't build condor
         return None
 
     sp_px = _mid_price(sp_row)
@@ -558,12 +550,6 @@ def build_iron_condor(
         return None
 
     chosen_expiry = str(sp_row["expiry"])
-
-    # attempt to pull tradingsymbols if available
-    sp_sym = sp_row.get("tradingsymbol") or sp_row.get("symbol") or None
-    lp_sym = lp_row.get("tradingsymbol") or lp_row.get("symbol") or None
-    sc_sym = sc_row.get("tradingsymbol") or sc_row.get("symbol") or None
-    lc_sym = lc_row.get("tradingsymbol") or lc_row.get("symbol") or None
 
     return IronCondor(
         symbol=symbol,
@@ -578,8 +564,4 @@ def build_iron_condor(
         long_call_price=float(lc_px),
         lot_size=int(lot_size),
         size_aggressiveness=float(size_aggressiveness),
-        short_put_sym=(str(sp_sym) if sp_sym is not None else None),
-        long_put_sym=(str(lp_sym) if lp_sym is not None else None),
-        short_call_sym=(str(sc_sym) if sc_sym is not None else None),
-        long_call_sym=(str(lc_sym) if lc_sym is not None else None),
     )

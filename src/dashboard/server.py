@@ -1,12 +1,12 @@
 # src/dashboard/server.py
 """
-FastAPI server for Live Paper Dashboard — Option B FINAL v2
+FastAPI server for Live Paper Dashboard — Advanced + WebSocket broadcaster
 
-Fixes:
-- sanitize() now converts NaN -> None (JSON-safe).
-- heatmap() reads instrument_type defensively (str(...).upper()).
-- get_state() uses sanitize before returning JSON so NaNs never leak.
-- /api/atm made robust: rejects NaN/inf and malformed strikes (no more int(nan) crash).
+Patched:
+- Defensive ML loading (joblib preferred)
+- Uses pandas DataFrame with named columns when scoring to avoid sklearn warnings
+- Falls back to numpy/list-of-lists when pandas not available
+- Keeps all existing endpoints and WebSocket broadcaster behavior
 """
 
 from datetime import datetime
@@ -15,13 +15,24 @@ from typing import Any, Dict, List, Optional
 import json
 import logging
 import math
+import asyncio
+import warnings
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 
 LOG = logging.getLogger(__name__)
 LOG.setLevel(logging.INFO)
+
+# Try to import pandas defensively — scoring will use DataFrame if available
+try:
+    import pandas as _pd  # type: ignore
+except Exception:
+    _pd = None
+
+# suppress sklearn "feature names" warning only (narrow filter)
+warnings.filterwarnings("ignore", message="X does not have valid feature names")
 
 # ----------------------------------------------------------------------
 # File paths used by engine
@@ -39,14 +50,181 @@ CURRENT_POS_FILE = BASE_DIR / "current_position.json"
 # static dir relative to this file
 STATIC_DIR = Path(__file__).parent / "static"
 
-app = FastAPI(title="IC Live Paper Dashboard - Advanced")
+app = FastAPI(title="IC Live Paper Dashboard - Advanced (WS)")
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+# ----------------------------------------------------------------------
+# ML support (defensive)
+# ----------------------------------------------------------------------
+try:
+    import joblib  # type: ignore
+    import numpy as _np  # type: ignore
+    _ML_AVAILABLE = True
+except Exception:
+    joblib = None
+    _np = None
+    _ML_AVAILABLE = False
+
+MODEL_PATH = BASE_DIR / "model.pkl"
+# hot-cache for loaded model
+_ml_bundle = None
+
+def _load_ml_bundle():
+    global _ml_bundle
+    try:
+        if not _ML_AVAILABLE:
+            return None
+        # if already loaded, return
+        if _ml_bundle is not None:
+            return _ml_bundle
+        if MODEL_PATH.exists():
+            _ml_bundle = joblib.load(str(MODEL_PATH))
+            LOG.info("ML bundle loaded from %s", MODEL_PATH)
+            return _ml_bundle
+    except Exception:
+        LOG.exception("Failed to load ML model bundle")
+    return None
+
+def _score_candidate_with_model(bundle, candidate_features: dict):
+    """
+    candidate_features: dict mapping feature_name->value (numbers or convertible)
+    bundle: dict with keys 'classifier','regressor','features'
+    Returns dict: {ok, p_win, expected_pnl, top_features: [{feature, contrib}], score}
+    Defensive: returns None fields if anything missing.
+    """
+    out = {"ok": False, "p_win": None, "expected_pnl": None, "top_features": [], "score": None}
+    try:
+        if not bundle:
+            return out
+
+        clf = bundle.get("classifier")
+        reg = bundle.get("regressor")
+        feat_list = list(bundle.get("features", [])) if bundle.get("features") else []
+
+        # Build the prediction input using pandas DataFrame if available and feature list present.
+        X_input = None
+        pd = _pd  # may be None
+        if feat_list and pd is not None:
+            # Use DataFrame with exact column order expected by the model to avoid sklearn warnings.
+            row = {}
+            for f in feat_list:
+                v = candidate_features.get(f, 0.0)
+                try:
+                    row[f] = float(v)
+                except Exception:
+                    row[f] = 0.0
+            try:
+                X_input = pd.DataFrame([row], columns=feat_list)
+            except Exception:
+                X_input = None
+
+        # Fallback: produce numpy array/list of lists
+        if X_input is None:
+            try:
+                # prefer numpy if available
+                if _np is not None and feat_list:
+                    arr = []
+                    for f in feat_list:
+                        try:
+                            arr.append(float(candidate_features.get(f, 0.0)))
+                        except Exception:
+                            arr.append(0.0)
+                    X_input = _np.array([arr], dtype=float)
+                else:
+                    # feature list not available; convert sorted keys
+                    keys = sorted(candidate_features.keys())
+                    arr = []
+                    for k in keys:
+                        try:
+                            arr.append(float(candidate_features.get(k, 0.0)))
+                        except Exception:
+                            arr.append(0.0)
+                    X_input = [arr]  # list-of-lists
+            except Exception:
+                X_input = [[0.0]]
+
+        # Classifier prediction (prefer predict_proba)
+        p_win = None
+        if clf is not None and X_input is not None:
+            try:
+                if hasattr(clf, "predict_proba"):
+                    proba = clf.predict_proba(X_input)
+                    # choose probability for positive class if possible
+                    try:
+                        classes = getattr(clf, "classes_", None)
+                        if classes is not None and 1 in list(classes):
+                            idx = int(list(classes).index(1))
+                            p_win = float(proba[0][idx])
+                        else:
+                            # fallback to last column (prob of positive class usually)
+                            p_win = float(proba[0][-1])
+                    except Exception:
+                        p_win = float(proba[0][-1])
+                else:
+                    # fallback to predict -> numeric label
+                    pred = clf.predict(X_input)[0]
+                    p_win = float(pred)
+            except Exception:
+                LOG.exception("ML scoring: classifier predict failure")
+
+        # Regressor prediction
+        expected_pnl = None
+        if reg is not None and X_input is not None:
+            try:
+                pred = reg.predict(X_input)[0]
+                expected_pnl = float(pred)
+            except Exception:
+                LOG.exception("ML scoring: regressor predict failure")
+
+        out["p_win"] = p_win
+        out["expected_pnl"] = expected_pnl
+
+        # Top feature contributions (approx): value * feature_importance from classifier
+        top_features = []
+        try:
+            if feat_list and clf is not None and hasattr(clf, "feature_importances_"):
+                imps = list(clf.feature_importances_)
+                contribs = []
+                for i, fname in enumerate(feat_list):
+                    try:
+                        val = float(candidate_features.get(fname, 0.0))
+                    except Exception:
+                        val = 0.0
+                    imp = imps[i] if i < len(imps) else 0.0
+                    contrib = float(val) * float(imp)
+                    contribs.append((fname, contrib))
+                contribs_sorted = sorted(contribs, key=lambda x: abs(x[1]), reverse=True)[:4]
+                top_features = [{"feature": n, "contrib": c} for (n, c) in contribs_sorted]
+        except Exception:
+            LOG.exception("ML scoring: failed to compute top_features")
+
+        out["top_features"] = top_features
+
+        # Combined score (same as trainer)
+        try:
+            p = out["p_win"] if out["p_win"] is not None else 0.0
+            ep = out["expected_pnl"] if out["expected_pnl"] is not None else 0.0
+            out["score"] = float(p) + 0.01 * float(ep)
+        except Exception:
+            out["score"] = None
+
+        out["ok"] = True
+    except Exception:
+        LOG.exception("ml scoring failed")
+    return out
 
 # ----------------------------------------------------------------------
 # In-memory LTP history
 # ----------------------------------------------------------------------
 LTP_MAX_POINTS = 500
 ltp_history: List[Dict[str, Any]] = []
+
+# ----------------------------------------------------------------------
+# WebSocket clients set and config
+# ----------------------------------------------------------------------
+_ws_clients: "set[WebSocket]" = set()
+# Broadcast cadence in seconds (tune as needed)
+BROADCAST_POLL_INTERVAL = 1.0
 
 
 def safe_load_json(path: Path, default: Any):
@@ -80,17 +258,20 @@ def write_manual_exit_flag():
     payload = {
         "force_exit": True,
         "timestamp": datetime.now().isoformat(timespec="seconds"),
-        "source": "fastapi_dashboard",
+        "source": "fastapi_dashboard_ws",
     }
-    with MANUAL_EXIT_FILE.open("w", encoding="utf-8") as f:
-        json.dump(payload, f, indent=2)
+    try:
+        with MANUAL_EXIT_FILE.open("w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2)
+    except Exception:
+        LOG.exception("Failed to write manual exit flag")
 
 
 def sanitize(obj):
     """
     Convert objects to JSON-safe representation:
     - datetime -> isoformat
-    - NaN (float('nan')) -> None
+    - NaN (float('nan')) or inf -> None
     - recursively sanitize lists/dicts
     """
     # primitives
@@ -120,7 +301,7 @@ def sanitize(obj):
 
 
 # ----------------------------------------------------------------------
-# Routes
+# Routes (unchanged behavior)
 # ----------------------------------------------------------------------
 @app.get("/", include_in_schema=False)
 async def index():
@@ -449,6 +630,169 @@ async def health():
 
 
 # ----------------------------------------------------------------------
+# WebSocket broadcaster and control
+# ----------------------------------------------------------------------
+async def _snapshot_broadcaster(poll_interval: float = BROADCAST_POLL_INTERVAL):
+    """
+    Background task that reads snapshot + states and broadcasts to connected websockets.
+    """
+    LOG.info("WebSocket broadcaster started (interval=%.3fs)", poll_interval)
+    while True:
+        try:
+            snapshot = safe_load_json(SNAPSHOT_FILE, default=[])
+            broker_state = safe_load_json(BROKER_STATE_FILE, default={})
+            pnl_history = safe_load_json(PNL_HISTORY_FILE, default=[])
+            risk_state = safe_load_json(RISK_STATE_FILE, default={})
+            current_pos = safe_load_json(CURRENT_POS_FILE, default={})
+
+            # attempt to append LTP point too
+            try:
+                if isinstance(snapshot, list) and len(snapshot) > 0:
+                    first_row = snapshot[0]
+                    spot = first_row.get("spot") if isinstance(first_row, dict) else None
+                    ts = first_row.get("timestamp") if isinstance(first_row, dict) else None
+                    if spot is not None:
+                        _append_ltp_point(spot, ts)
+            except Exception:
+                LOG.exception("broadcaster failed to append ltp")
+
+            payload = {
+                "server_time": datetime.now().isoformat(timespec="seconds"),
+                "snapshot": snapshot,
+                "broker_state": broker_state,
+                "pnl_history": pnl_history,
+                "risk_state": risk_state,
+                "current_position": current_pos,
+                # include ltp timeseries for charts
+                "ltp_times": [p["t"] for p in ltp_history],
+                "ltp_prices": [p["p"] for p in ltp_history],
+            }
+
+            # ---- ML block: best-effort attach ml evaluation ----
+            try:
+                bundle = _load_ml_bundle()
+                ml_block = {"available": bool(bundle)}
+                candidate_features = {}
+
+                # Prefer a canonical candidate feature object if current_position contains it
+                if isinstance(current_pos, dict) and current_pos.get("candidate_features"):
+                    try:
+                        candidate_features = dict(current_pos.get("candidate_features"))
+                    except Exception:
+                        candidate_features = {}
+
+                else:
+                    # best-effort: try to extract basic features from snapshot[0]
+                    if isinstance(snapshot, list) and len(snapshot) > 0 and isinstance(snapshot[0], dict):
+                        row0 = snapshot[0]
+                        try:
+                            candidate_features["spot"] = float(row0.get("spot") or row0.get("ltp") or 0.0)
+                        except Exception:
+                            candidate_features["spot"] = 0.0
+                        # map typical feature names (if available)
+                        # if snapshot row contains strike info, use it heuristically
+                        try:
+                            if row0.get("strike") is not None:
+                                s = float(row0.get("strike"))
+                                candidate_features["short_put"] = int(round(s))
+                                candidate_features["short_call"] = int(round(s))
+                                candidate_features["long_put"] = int(round(s - 50))
+                                candidate_features["long_call"] = int(round(s + 50))
+                        except Exception:
+                            pass
+                        # entry credit heuristics (if snapshot has price columns)
+                        try:
+                            if "bid" in row0 and "ask" in row0:
+                                candidate_features["entry_credit"] = float((row0.get("bid", 0.0) + row0.get("ask", 0.0)) / 2.0)
+                        except Exception:
+                            pass
+
+                if bundle:
+                    ml_eval = _score_candidate_with_model(bundle, candidate_features)
+                    ml_block["eval"] = ml_eval
+                payload["ml"] = ml_block
+            except Exception:
+                LOG.exception("Failed to attach ML info to payload")
+
+            data = sanitize(payload)
+
+            # send to all clients
+            dead = []
+            for ws in list(_ws_clients):
+                try:
+                    await ws.send_json(data)
+                except Exception as e:
+                    LOG.debug("WS send failed: %s", e)
+                    dead.append(ws)
+
+            # cleanup dead clients
+            for d in dead:
+                try:
+                    _ws_clients.discard(d)
+                    await d.close()
+                except Exception:
+                    pass
+
+        except Exception:
+            LOG.exception("snapshot_broadcaster error")
+        await asyncio.sleep(poll_interval)
+
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    """
+    WebSocket endpoint:
+    - pushes periodic snapshots to client via broadcaster
+    - listens for simple control JSON messages from client, e.g. {"cmd":"force-exit"}
+    """
+    await websocket.accept()
+    _ws_clients.add(websocket)
+    LOG.info("WebSocket client connected. total=%d", len(_ws_clients))
+    try:
+        while True:
+            # We expect the client mostly to be passive; await a small message for keepalive/control
+            try:
+                msg = await websocket.receive_text()
+            except WebSocketDisconnect:
+                raise
+            except Exception:
+                # Occasionally client may not send anything — continue listening
+                await asyncio.sleep(0.1)
+                continue
+
+            # try to parse JSON commands
+            try:
+                obj = json.loads(msg)
+                if isinstance(obj, dict):
+                    cmd = obj.get("cmd")
+                    if cmd == "force-exit":
+                        write_manual_exit_flag()
+                        await websocket.send_json({"ok": True, "message": "force-exit written"})
+                    else:
+                        # unknown command -> echo
+                        await websocket.send_json({"ok": True, "message": f"unknown cmd {cmd}"})
+                else:
+                    await websocket.send_json({"ok": False, "message": "expected json object"})
+            except json.JSONDecodeError:
+                # ignore non-json text; optionally echo back
+                await websocket.send_json({"ok": False, "message": "invalid json"})
+            except Exception:
+                LOG.exception("Error processing ws message")
+                try:
+                    await websocket.send_json({"ok": False, "message": "internal error"})
+                except Exception:
+                    pass
+
+    except WebSocketDisconnect:
+        LOG.info("WebSocket client disconnected")
+    except Exception:
+        LOG.exception("WebSocket endpoint error")
+    finally:
+        if websocket in _ws_clients:
+            _ws_clients.discard(websocket)
+
+
+# ----------------------------------------------------------------------
 # DASHBOARD STARTER — required by agent_trade.py
 # ----------------------------------------------------------------------
 def start_dashboard(host="127.0.0.1", port=8000):
@@ -460,6 +804,8 @@ def start_dashboard(host="127.0.0.1", port=8000):
     import uvicorn
 
     def _run():
+        # set uvicorn access logger level to WARNING to reduce console spam (optional)
+        logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
         uvicorn.run(
             "src.dashboard.server:app",
             host=host,
@@ -471,3 +817,13 @@ def start_dashboard(host="127.0.0.1", port=8000):
     thread = threading.Thread(target=_run, daemon=True)
     thread.start()
     return thread
+
+
+# Ensure broadcaster is started when app starts
+@app.on_event("startup")
+async def _on_startup():
+    # spawn broadcaster background task
+    try:
+        asyncio.create_task(_snapshot_broadcaster(poll_interval=BROADCAST_POLL_INTERVAL))
+    except Exception:
+        LOG.exception("Failed to start snapshot broadcaster")

@@ -1,0 +1,39 @@
+{
+  "id": "trade-20251202_035258-527e7fca",
+  "time_utc": "2025-12-02T03:52:58",
+  "ic": {
+    "symbol": "NIFTY",
+    "expiry": "2025-12-02",
+    "short_put": 26050.0,
+    "long_put": 26000.0,
+    "short_call": 26350.0,
+    "long_call": 26400.0,
+    "short_put_price": 21.95,
+    "long_put_price": 15.0,
+    "short_call_price": 19.05,
+    "long_call_price": 12.05,
+    "lot_size": 25,
+    "size_aggressiveness": 1.0,
+    "short_put_sym": "NIFTY25D0226050PE",
+    "long_put_sym": "NIFTY25D0226000PE",
+    "short_call_sym": "NIFTY25D0226350CE",
+    "long_call_sym": "NIFTY25D0226400CE",
+    "entry_credit": 13.95,
+    "width": 50.0,
+    "notional_per_side": 1250.0,
+    "max_profit": 348.75,
+    "max_loss": 1250.0
+  },
+  "entry_snapshot": {
+    "entry_time": "2025-12-01T13:15:13.456057"
+  },
+  "exit_snapshot": {
+    "spot": 26145.25
+  },
+  "realized_pnl": 120.0,
+  "exit_reason": "stale_restore_auto_exit",
+  "metadata": {
+    "source": "live_engine",
+    "exit_reason": "stale_restore_auto_exit"
+  }
+}

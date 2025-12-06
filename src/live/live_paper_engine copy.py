@@ -78,6 +78,7 @@ TRADES_DB_FILE = os.path.join(MONITOR_PATH, "trades.db")
 os.makedirs(MONITOR_PATH, exist_ok=True)
 
 
+
 class LivePaperEngine:
     def __init__(
         self,
@@ -113,6 +114,7 @@ class LivePaperEngine:
         # entry cutoff
         self.no_new_entries_after = no_new_entries_after
 
+
         # ======================= APIs =============================
         try:
             self.live_api = KiteAPI(mode="live")
@@ -129,6 +131,7 @@ class LivePaperEngine:
             self.paper_api = None
 
         self.broker = PaperBroker(capital=self.starting_capital)
+
 
         # ======================= Risk Engine =============================
         dd_raw = float(risk_daily_loss_limit)
@@ -148,19 +151,22 @@ class LivePaperEngine:
         self.risk = RiskEngine(max_trade_risk_pct=max_trade_frac, max_daily_drawdown_pct=max_dd_frac)
         self.risk.reset_day_if_needed(datetime.now().date(), self.broker.balance)
 
+
         # ======================= Signal Generator =============================
         self.signal_gen = SignalGenerator(
             symbol=self.symbol,
             lot_size=self.lot_size,
             width=self.width,
-            size_aggressiveness=self.size_aggressiveness,
+            size_aggressiveness=self.size_aggressiveness
         )
+
 
         # ======================= Exit Engine =============================
         cfg = ExitEngineConfig()
         cfg.hard_close_time = time(15, 20)
         cfg.disable_time_exit = True
         self.exit_engine = ExitEngine(cfg)
+
 
         # ======================= Runtime State =============================
         self.trades_today = 0
@@ -171,6 +177,7 @@ class LivePaperEngine:
         self.pnl_history: List[Dict[str, Any]] = []
 
         os.makedirs(MONITOR_PATH, exist_ok=True)
+
 
         # ======================= Trades DB =============================
         try:
@@ -201,6 +208,7 @@ class LivePaperEngine:
             self._trades_db = None
             self._trades_db_path = None
 
+
         # ======================= LLM Selector =============================
         self.use_llm_selector = bool(kwargs.get("use_llm_selector", False))
         self._ollama_client = None
@@ -212,18 +220,16 @@ class LivePaperEngine:
             log.exception("LivePaperEngine: Failed to create Ollama client")
             self._ollama_client = None
 
+
         log.info(
             "LivePaperEngine initialized: symbol=%s lot=%s width=%s starting_capital=%.2f no_new_after=%s stale_cooldown_s=%s",
-            self.symbol,
-            self.lot_size,
-            self.width,
-            self.starting_capital,
-            self.no_new_entries_after,
-            self.stale_exit_cooldown_seconds,
+            self.symbol, self.lot_size, self.width, self.starting_capital,
+            self.no_new_entries_after, self.stale_exit_cooldown_seconds
         )
 
-        # ==============================================================  
-        # Startup housekeeping
+        # ==============================================================
+        # NOTE: old `_restore_open_position()` removed completely.
+        # We now use only:  self._reconcile_state_on_startup()
         # ==============================================================
         try:
             self._auto_clean_monitor_files()
@@ -233,12 +239,11 @@ class LivePaperEngine:
         try:
             self._reconcile_state_on_startup()
         except Exception:
-            log.exception("Reconciliation on startup failed (non-fatal)")
+            log.exception("Reconciliation on startup failed (non-fatal)")            
 
     # ---------------- helpers -----------------
     def _sanitize(self, obj: Any) -> Any:
         import datetime as _dt
-
         if isinstance(obj, _dt.datetime):
             return obj.isoformat()
         if isinstance(obj, _dt.date):
@@ -310,6 +315,12 @@ class LivePaperEngine:
     def _auto_clean_monitor_files(self) -> None:
         """
         Remove or neutralize obviously-stale monitor files to avoid phantom open-IC in the UI.
+        Conservative rules:
+          - If current_position.json *looks* like an IC (contains IC-like keys), but
+            paper_broker_state.json has no valid open_positions according to _is_valid_open_positions,
+            then clear current_position.json and write a minimal paper_broker_state.json.
+          - If paper_broker_state.json exists but its open_positions are malformed, normalize it to {"open_positions": []}.
+        This runs on startup only and logs operations. It will not delete trades.db or records.jsonl.
         """
         try:
             cur = self._safe_read_json(CURRENT_POS_FILE) or {}
@@ -324,16 +335,15 @@ class LivePaperEngine:
 
             # If current looks like IC but broker has no valid open positions -> clear cur + normalize broker
             if cur_is_ic_like and not broker_valid:
-                log.warning(
-                    "Auto-clean: detected IC-like current_position but invalid/missing "
-                    "broker open_positions. Purging stale files."
-                )
+                log.warning("Auto-clean: detected IC-like current_position but invalid/missing broker open_positions. Purging stale files.")
                 try:
+                    # clear current_position
                     self._safe_write_json(CURRENT_POS_FILE, {})
                 except Exception:
                     log.exception("Auto-clean failed to clear current_position.json")
 
                 try:
+                    # ensure broker state minimal and consistent
                     minimal = {
                         "open_positions": [],
                         "capital": float(getattr(self, "starting_capital", 0.0)),
@@ -345,14 +355,13 @@ class LivePaperEngine:
                     log.exception("Auto-clean failed to write minimal paper_broker_state.json")
 
                 try:
+                    # clear recovered position file as it's stale too
                     self._safe_write_json(RECOVERED_POS_FILE, {})
                 except Exception:
                     pass
 
-            # If broker open_positions exists but malformed -> normalize it
-            if broker.get("open_positions") is not None and not self._is_valid_open_positions(
-                broker.get("open_positions")
-            ):
+            # If broker open_positions exists but malformed -> normalize it (no purge of current_position here)
+            if broker.get("open_positions") is not None and not self._is_valid_open_positions(broker.get("open_positions")):
                 try:
                     log.info("Auto-clean: normalizing malformed paper_broker_state.open_positions -> []")
                     broker["open_positions"] = []
@@ -361,6 +370,7 @@ class LivePaperEngine:
                     log.exception("Auto-clean failed to normalize paper_broker_state")
         except Exception:
             log.exception("Auto-clean monitor files failed")
+
 
     # ------------------ reconstruction helper ------------------
     def _reconstruct_open_positions_from_ic(self, ic: dict) -> dict:
@@ -436,6 +446,8 @@ class LivePaperEngine:
     def _reconcile_state_on_startup(self) -> None:
         """
         Ensure CURRENT_POS and PAPER_BROKER_STATE files agree.
+        If current_position shows an IC but broker_state has no open_positions:
+        → reconstruct using trades.db or current_position.
         """
         try:
             cur = self._safe_read_json(CURRENT_POS_FILE) or {}
@@ -443,10 +455,7 @@ class LivePaperEngine:
 
             open_ic_present = False
             if isinstance(cur, dict) and (
-                "short_put" in cur
-                or "short_call" in cur
-                or "short_put_sym" in cur
-                or "short_call_sym" in cur
+                "short_put" in cur or "short_call" in cur or "short_put_sym" in cur or "short_call_sym" in cur
             ):
                 open_ic_present = True
 
@@ -577,10 +586,12 @@ class LivePaperEngine:
         except Exception:
             log.exception("_insert_trade_db failed")
 
+
     # ------------------ Append entry record (IV/delta included) ------------------
     def _append_record_entry(self, ic_obj, replay_id=None):
         """
         Full entry labeling logic including best-effort IV/delta for each leg.
+        Preserved from your original implementation.
         """
         try:
             os.makedirs(MONITOR_PATH, exist_ok=True)
@@ -598,12 +609,14 @@ class LivePaperEngine:
             except Exception:
                 rec["chain_snapshot"] = None
 
+            # minimal engine config
             rec["engine_config"] = {
                 "width": self.width,
                 "lot_size": self.lot_size,
                 "size_aggressiveness": self.size_aggressiveness,
             }
 
+            # ===== Attempt IV/delta computation per leg =====
             legs = []
             cand = rec["candidate"]
             if isinstance(cand, dict) and cand.get("legs"):
@@ -635,8 +648,7 @@ class LivePaperEngine:
                             if strike is not None and rstrike is not None:
                                 if float(rstrike) == float(strike):
                                     if opt_type is None or (
-                                        rtype is not None
-                                        and str(rtype).upper().startswith(str(opt_type).upper())
+                                        rtype is not None and str(rtype).upper().startswith(str(opt_type).upper())
                                     ):
                                         return row.get("ltp") or row.get("last_price")
                         except Exception:
@@ -659,14 +671,17 @@ class LivePaperEngine:
                         opt = getattr(lg, "option_type", None)
                         price = getattr(lg, "price", None)
 
+                    # fallback on symbol for strike detection
                     if strike is None and isinstance(sym, str):
                         parts = sym.split("_")
                         if parts[-1].replace(".", "", 1).isdigit():
                             strike = float(parts[-1])
 
+                    # market price fallback
                     if price is None:
                         price = find_market_price(sym, strike, opt)
 
+                    # find spot / expiry
                     expiry = None
                     spot = None
                     if chain:
@@ -679,6 +694,7 @@ class LivePaperEngine:
                         except Exception:
                             spot = None
 
+                    # parse expiry to year fraction
                     T = None
                     if expiry:
                         try:
@@ -696,6 +712,7 @@ class LivePaperEngine:
                         except Exception:
                             T = None
 
+                    # compute greeks
                     iv_val = None
                     delta_val = None
 
@@ -712,6 +729,7 @@ class LivePaperEngine:
                         )
                         continue
 
+                    # standardize option type
                     opt_type = None
                     if opt:
                         o = str(opt).upper()
@@ -725,26 +743,23 @@ class LivePaperEngine:
                         elif isinstance(sym, str) and "_PE_" in sym.upper():
                             opt_type = "PE"
 
+                    # IV attempt
                     r = 0.06
                     try:
                         iv_val = implied_volatility(spot, strike, T, r, opt_type, price)
                         if (
                             iv_val is None
-                            or (
-                                isinstance(iv_val, float)
-                                and (iv_val != iv_val or iv_val <= 0 or iv_val > 5)
-                            )
+                            or (isinstance(iv_val, float) and (iv_val != iv_val or iv_val <= 0 or iv_val > 5))
                         ):
                             iv_val = None
                     except Exception:
                         iv_val = None
 
+                    # delta attempt
                     try:
                         if iv_val is not None:
                             try:
-                                d1 = (log(spot / strike) + (r + 0.5 * iv_val**2) * T) / (
-                                    iv_val * sqrt(T)
-                                )
+                                d1 = (log(spot / strike) + (r + 0.5 * iv_val**2) * T) / (iv_val * sqrt(T))
                                 if opt_type == "CE":
                                     delta_val = float(norm.cdf(d1))
                                 else:
@@ -752,6 +767,7 @@ class LivePaperEngine:
                             except Exception:
                                 delta_val = None
                         else:
+                            # finite differences fallback
                             eps = max(0.01, spot * 0.001)
                             p_up = bs_price(spot + eps, strike, T, r, iv_val or 0.2, opt_type)
                             p_dn = bs_price(spot - eps, strike, T, r, iv_val or 0.2, opt_type)
@@ -785,11 +801,13 @@ class LivePaperEngine:
     # ---------------- snapshot writing -----------------
     def _write_snapshot_files(self, chain_df: Optional[pd.DataFrame], mtm: float) -> None:
         try:
+            # latest_snapshot.json
             if chain_df is not None and not chain_df.empty:
                 snap = chain_df.to_dict(orient="records")
                 with open(LATEST_SNAPSHOT_FILE, "w") as f:
                     json.dump(self._sanitize(snap), f, indent=2)
 
+            # risk-state
             try:
                 risk_state = self.risk.get_state() if hasattr(self.risk, "get_state") else {}
             except Exception:
@@ -798,22 +816,17 @@ class LivePaperEngine:
             with open(RISK_STATE_FILE, "w") as f:
                 json.dump(self._sanitize(risk_state), f, indent=2)
 
+            # broker_state
             broker_state = {
                 "capital": float(self.broker.balance),
-                "starting_balance": float(
-                    getattr(self.broker, "starting_balance", self.starting_capital)
-                ),
-                "pnl": float(
-                    self.broker.balance
-                    - getattr(self.broker, "starting_balance", self.starting_capital)
-                ),
+                "starting_balance": float(getattr(self.broker, "starting_balance", self.starting_capital)),
+                "pnl": float(self.broker.balance - getattr(self.broker, "starting_balance", self.starting_capital)),
                 "trades": self.daily_history,
                 "open_ic_replay_id": int(self.open_ic_replay_id) if self.open_ic_replay_id else None,
-                "open_ic_entry_time": self.open_ic_entry_time.isoformat()
-                if self.open_ic_entry_time
-                else None,
+                "open_ic_entry_time": self.open_ic_entry_time.isoformat() if self.open_ic_entry_time else None,
             }
 
+            # include open positions
             try:
                 if hasattr(self.broker, "open_positions"):
                     op = self.broker.open_positions
@@ -840,11 +853,13 @@ class LivePaperEngine:
             with open(PAPER_BROKER_STATE_FILE, "w") as f:
                 json.dump(self._sanitize(broker_state), f, indent=2)
 
+            # pnl history append
             now_iso = datetime.now().isoformat()
             self.pnl_history.append({"time": now_iso, "pnl": broker_state["pnl"]})
             with open(PNL_HISTORY_FILE, "w") as f:
                 json.dump(self._sanitize(self.pnl_history), f, indent=2)
 
+            # current_position.json
             cur = {}
             if self.open_ic is not None:
                 try:
@@ -892,12 +907,8 @@ class LivePaperEngine:
             log.warning("Max daily trades reached")
             return False
 
-        # NEW: only block on open_ic if overlap not allowed
         if self.open_ic is not None and not self.allow_overlap_open_ic:
-            log.info(
-                "Already in an open IC, skipping new entry "
-                "(allow_overlap_open_ic=False)"
-            )
+            log.info("Already in an open IC, skipping new entry (allow_overlap_open_ic=False)")
             return False
 
         # stale exit cooldown
@@ -918,10 +929,12 @@ class LivePaperEngine:
 
         return True
 
+
     # ---------------- symbol validation -----------------
     def _validate_ic_orders(self, ic_obj, chain_df):
         """
         Check if the candidate's entry orders reference symbols present in chain_df.
+        Returns (ok, bad_symbol).
         """
         try:
             orders = []
@@ -936,6 +949,7 @@ class LivePaperEngine:
                         except Exception:
                             continue
 
+            # build set of available symbols
             ts_set = set()
             if chain_df is not None and not chain_df.empty:
                 if "tradingsymbol" in chain_df.columns:
@@ -974,6 +988,7 @@ class LivePaperEngine:
             if not strikes:
                 return None
 
+            # extract legs
             legs = getattr(candidate, "legs", None)
             if not legs:
                 try:
@@ -1013,6 +1028,7 @@ class LivePaperEngine:
                     new_legs.append(leg)
                     continue
 
+                # detect option type
                 opt = None
                 if isinstance(sym, str):
                     u = sym.upper()
@@ -1043,6 +1059,7 @@ class LivePaperEngine:
             if not changed:
                 return None
 
+            # build new candidate object
             class SimpleCand:
                 pass
 
@@ -1163,11 +1180,13 @@ class LivePaperEngine:
                         realized = 0.0
                         log.exception("exit_pnl failed for stale IC")
 
+                    # broker apply
                     try:
                         self.broker.realize_pnl(realized)
                     except Exception:
                         log.exception("broker.realize_pnl failed")
 
+                    # ML linking
                     try:
                         metadata = {"source": "live_engine", "exit_reason": "stale_restore_auto_exit"}
                         if self.open_ic_replay_id is not None:
@@ -1205,6 +1224,7 @@ class LivePaperEngine:
                     except Exception:
                         log.exception("record_trade failed for stale exit")
 
+                    # DB insert
                     try:
                         dur = (
                             (datetime.now() - self.open_ic_entry_time).total_seconds()
@@ -1221,6 +1241,7 @@ class LivePaperEngine:
                     except Exception:
                         log.exception("DB write failed for stale exit")
 
+                    # history + clear
                     try:
                         self.daily_history.append(
                             {
@@ -1239,12 +1260,14 @@ class LivePaperEngine:
                     self.open_ic_replay_id = None
                     self.open_ic_entry_time = None
 
+                    # clear current_position.json
                     try:
                         with open(CURRENT_POS_FILE, "w") as f:
                             json.dump({}, f, indent=2)
                     except Exception:
                         log.exception("Failed to clear CURRENT_POS after stale exit")
 
+                    # cooldown
                     try:
                         self._stale_exit_cooldown_until = datetime.now() + timedelta(
                             seconds=self.stale_exit_cooldown_seconds
@@ -1253,6 +1276,7 @@ class LivePaperEngine:
                     except Exception:
                         self._stale_exit_cooldown_until = None
 
+                    # unfreeze SG
                     try:
                         if hasattr(self.signal_gen, "unfreeze"):
                             self.signal_gen.unfreeze()
@@ -1260,6 +1284,7 @@ class LivePaperEngine:
                         log.exception("SG unfreeze failed after stale exit")
         except Exception:
             log.exception("Stale exit handling failed")
+
 
         # ===== Candidate generation (SG or LLM) =====
         candidate = None
@@ -1283,11 +1308,7 @@ class LivePaperEngine:
 
         # ===== Try LLM selector =====
         try:
-            if (
-                self.use_llm_selector
-                and self._ollama_client is not None
-                and (self.open_ic is None or self.allow_overlap_open_ic)
-            ):
+            if self.use_llm_selector and self._ollama_client is not None and self.open_ic is None:
                 try:
                     snapshot = {
                         "symbol": self.symbol,
@@ -1297,6 +1318,7 @@ class LivePaperEngine:
                         "chain": chain_df.to_dict(orient="records") if not chain_df.empty else [],
                     }
 
+                    # --- LLM execution callback ---
                     def execute_trade_callback(payload: dict):
                         try:
                             cand = payload.get("candidate")
@@ -1369,6 +1391,7 @@ class LivePaperEngine:
                             log.exception("LLM execute callback failed")
                             return {"placed": False}
 
+                    # --- LLM risk-check callback ---
                     def risk_check_callback(payload: dict) -> bool:
                         try:
                             cand = payload.get("candidate")
@@ -1384,6 +1407,7 @@ class LivePaperEngine:
                             log.exception("risk_check_callback error")
                             return False
 
+                    # --- run LLM selector ---
                     res = run_selection_once(
                         snapshot=snapshot,
                         ollama_client=self._ollama_client,
@@ -1395,6 +1419,7 @@ class LivePaperEngine:
 
                     log.info("LLM selector result: %s", res)
 
+                    # capture replay_id
                     try:
                         rid = (
                             res.get("replay_id")
@@ -1406,6 +1431,7 @@ class LivePaperEngine:
                     except Exception:
                         self.open_ic_replay_id = None
 
+                    # if placed, update open_ic
                     if isinstance(res, dict) and res.get("status") == "placed":
                         try:
                             if hasattr(self.broker, "last_open_ic"):
@@ -1417,9 +1443,8 @@ class LivePaperEngine:
                         self.trades_today += 1
 
                         try:
-                            if not self.allow_overlap_open_ic:
-                                if hasattr(self.signal_gen, "freeze"):
-                                    self.signal_gen.freeze()
+                            if hasattr(self.signal_gen, "freeze"):
+                                self.signal_gen.freeze()
                         except Exception:
                             pass
 
@@ -1429,6 +1454,7 @@ class LivePaperEngine:
                             log.exception("DB insert failed for llm entry")
 
                         candidate = self.open_ic
+
                     else:
                         candidate = None
 
@@ -1440,7 +1466,7 @@ class LivePaperEngine:
             candidate = None
 
         # ===== If no LLM candidate → use SignalGenerator =====
-        if candidate is None and (self.open_ic is None or self.allow_overlap_open_ic):
+        if candidate is None and self.open_ic is None:
             try:
                 try:
                     cands = self.signal_gen.generate(chain_df=chain_df, spot=spot)
@@ -1455,7 +1481,7 @@ class LivePaperEngine:
                 candidate = None
 
         # ===== Validate candidate =====
-        if candidate is not None and (self.open_ic is None or self.allow_overlap_open_ic):
+        if candidate is not None and self.open_ic is None:
             try:
                 ok, bad = self._validate_ic_orders(candidate, chain_df)
                 if not ok:
@@ -1491,8 +1517,9 @@ class LivePaperEngine:
                 candidate = None
 
         # ===== Entry processing =====
-        if candidate is not None and (self.open_ic is None or self.allow_overlap_open_ic):
+        if candidate is not None and self.open_ic is None:
             try:
+                # risk check
                 tr = self._estimate_trade_risk(candidate)
                 if self._pre_trade_risk_check(tr):
                     log.info("Opening IC")
@@ -1508,11 +1535,8 @@ class LivePaperEngine:
                     self.trades_today += 1
 
                     try:
-                        # Only freeze if NOT allowing multiple ICs
-                        if not self.allow_overlap_open_ic:
-                            if hasattr(self.signal_gen, "freeze"):
-                                self.signal_gen.freeze()
-
+                        if hasattr(self.signal_gen, "freeze"):
+                            self.signal_gen.freeze()
                     except Exception:
                         pass
 
@@ -1523,6 +1547,7 @@ class LivePaperEngine:
 
             except Exception:
                 log.exception("Entry handling failed")
+
 
         # ===== Exit conditions =====
         if self.open_ic is not None:
@@ -1554,11 +1579,7 @@ class LivePaperEngine:
                                 else self.open_ic
                             )
 
-                            entry_snap = (
-                                {"entry_time": self.open_ic_entry_time.isoformat()}
-                                if self.open_ic_entry_time
-                                else {}
-                            )
+                            entry_snap = {"entry_time": self.open_ic_entry_time.isoformat()} if self.open_ic_entry_time else {}
                             exit_snap = {}
                             if chain_df is not None and not chain_df.empty:
                                 try:
@@ -1577,6 +1598,7 @@ class LivePaperEngine:
                         except Exception:
                             log.exception("record_trade failed on exit signal")
 
+                        # db
                         try:
                             dur = (
                                 (datetime.now() - self.open_ic_entry_time).total_seconds()
@@ -1655,11 +1677,7 @@ class LivePaperEngine:
                         else self.open_ic
                     )
 
-                    entry_snap = (
-                        {"entry_time": self.open_ic_entry_time.isoformat()}
-                        if self.open_ic_entry_time
-                        else {}
-                    )
+                    entry_snap = {"entry_time": self.open_ic_entry_time.isoformat()} if self.open_ic_entry_time else {}
                     exit_snap = {}
                     if chain_df is not None and not chain_df.empty:
                         try:
@@ -1678,6 +1696,7 @@ class LivePaperEngine:
                 except Exception:
                     log.exception("record_trade failed on manual exit")
 
+                # db
                 try:
                     dur = (
                         (datetime.now() - self.open_ic_entry_time).total_seconds()
@@ -1740,3 +1759,4 @@ class LivePaperEngine:
             log.exception("snapshot writing after exits failed")
 
     # ========================== END OF FILE ==========================
+

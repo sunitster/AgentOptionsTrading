@@ -90,8 +90,9 @@ def update_env_token(new_token):
 def refresh_token():
     cfg = load_config()
 
-    api_key = cfg["kite"]["api_key"]
-    api_secret = cfg["kite"]["api_secret"]
+
+    api_key = cfg["api_key"]
+    api_secret = cfg["api_secret"]
 
     print("\n==============================")
     print("   Zerodha Token Refresher")
@@ -118,7 +119,7 @@ def refresh_token():
     print(f"\n✔ New access_token: {access_token}")
 
     # Save to config.yaml
-    cfg["kite"]["access_token"] = access_token
+    cfg["access_token"] = access_token
     save_config(cfg)
 
     # Save to .env

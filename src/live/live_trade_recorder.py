@@ -1,43 +1,13 @@
 # src/live/live_trade_recorder.py
 """
-Live Trade Recorder + Ingest utilities
+Live Trade Recorder + Ingest utilities (patched, robust)
 
-This module provides two main pieces:
-
-1) record_trade(...) -> called by LivePaperEngine when an IC is closed (realized)
-   - writes a JSONL line into models/live_trades/live_trades.jsonl
-   - writes a per-trade JSON into models/live_trades/YYYYMMDD_HHMMSS-<posid>.json
-   - attempts to also append to a parquet file models/live_trades/live_trades.parquet
-
-2) ingest_live_trades(...) -> used by the training pipeline to convert the
-   collected live trades into a tidy parquet file that can be consumed by
-   src/learning/run_full_historical_training (or your feature store).
-
-Design goals:
-- Non-intrusive: writing files under models/live_trades only
-- Robust: tolerates partial/malformed inputs
-- Minimal dependencies: pandas used only if available
-
-Usage (from LivePaperEngine):
-
-from src.live.live_trade_recorder import record_trade
-
-# after a trade exit has been executed and you have:
-# - ic_dict: dictionary representation of the IC
-# - entry_snapshot: snapshot dict at entry (can be chain_df.iloc[0].to_dict())
-# - exit_snapshot: snapshot dict at exit
-# - realized_pnl: float
-# - exit_reason: string
-# - metadata: dict (optional)
-
-record_trade(ic_dict, entry_snapshot, exit_snapshot, realized_pnl, exit_reason, metadata)
-
-
-Usage (for training ingestion):
-
-from src.live.live_trade_recorder import ingest_live_trades
-ingest_live_trades(output_parquet_path='learning_data/live_trades.parquet')
-
+- Writes per-trade JSON + JSONL + optional parquet.
+- Integrates with ML replay buffer:
+    * If ReplayBufferSQLite is importable, uses its API.
+    * Otherwise, falls back to direct sqlite writes into models/llm_trades/ml_replay.db
+      creating a compatible `replays` table.
+- Deterministic feature vector ordering and tolerant replay_id parsing.
 """
 from __future__ import annotations
 import json
@@ -47,6 +17,8 @@ from typing import Any, Dict, Optional
 import uuid
 import os
 import logging
+import time as _time
+import sqlite3
 
 LOG = logging.getLogger(__name__)
 LOG.setLevel(logging.INFO)
@@ -56,6 +28,10 @@ ROOT.mkdir(parents=True, exist_ok=True)
 
 JSONL_PATH = ROOT / "live_trades.jsonl"
 PARQUET_PATH = ROOT / "live_trades.parquet"
+
+# ML replay DB path (match ml_pipeline default location)
+ML_REPLAY_DB_PATH = Path("models") / "llm_trades" / "ml_replay.db"
+ML_REPLAY_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 
 def _safe_dump_json(path: Path, data: Dict[str, Any]):
@@ -74,6 +50,54 @@ def _safe_append_jsonl(path: Path, data: Dict[str, Any]):
         LOG.exception("Failed to append jsonl to %s", path)
 
 
+def _ensure_replays_table(conn: sqlite3.Connection) -> None:
+    cur = conn.cursor()
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS replays (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts TEXT,
+            ic_json TEXT,
+            entry_snapshot_json TEXT,
+            exit_snapshot_json TEXT,
+            realized_pnl REAL,
+            exit_reason TEXT,
+            metadata_json TEXT,
+            closed_at INTEGER
+        );
+        """
+    )
+    conn.commit()
+
+
+def _safe_json(obj: Any) -> str:
+    try:
+        return json.dumps(obj, default=str)
+    except Exception:
+        try:
+            return json.dumps(str(obj))
+        except Exception:
+            return "\"<unserializable>\""
+
+
+def _parse_replay_id(metadata: Dict[str, Any]) -> Optional[int]:
+    if not isinstance(metadata, dict):
+        return None
+    # case-insensitive search for common keys
+    keys = {k.lower(): k for k in metadata.keys()}
+    for candidate in ("replay_id", "ml_replay_id", "replayid", "replayId", "id"):
+        if candidate.lower() in keys:
+            raw = metadata.get(keys[candidate.lower()])
+            try:
+                return int(raw)
+            except Exception:
+                try:
+                    return int(float(raw))
+                except Exception:
+                    return None
+    return None
+
+
 def record_trade(
     ic: Dict[str, Any],
     entry_snapshot: Optional[Dict[str, Any]],
@@ -82,26 +106,22 @@ def record_trade(
     exit_reason: str,
     metadata: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Record a single closed IC trade to disk. Returns the saved record dict.
+    """Record a single closed IC trade to disk and update ML replay buffer when possible.
 
     Parameters
     ----------
     ic: dict
-        Dictionary-like representation of the IronCondor (legs, strikes, credit, lot_size, etc.)
     entry_snapshot: dict or None
-        Snapshot at entry (first row of chain_df converted to dict) - may contain 'spot', 'timestamp'
     exit_snapshot: dict or None
-        Snapshot at exit - may contain 'spot', 'timestamp'
     realized_pnl: float
-        Realized PnL for the whole IC (positive or negative)
     exit_reason: str
-        Short code for why trade exited (TIME_EXIT, SL, TP, MANUAL, etc.)
     metadata: dict (optional)
-        Any extra contextual metadata to save
     """
     now = datetime.utcnow()
     ts = now.isoformat(timespec="seconds")
     uid = f"trade-{now.strftime('%Y%m%d_%H%M%S')}-{uuid.uuid4().hex[:8]}"
+
+    metadata = metadata or {}
 
     record = {
         "id": uid,
@@ -162,14 +182,98 @@ def record_trade(
         df = pd.DataFrame([flat])
         # Append to parquet (fast). If file exists, concat; else create
         if PARQUET_PATH.exists():
-            existing = pd.read_parquet(PARQUET_PATH)
-            combined = pd.concat([existing, df], ignore_index=True)
-            combined.to_parquet(PARQUET_PATH, index=False)
+            try:
+                existing = pd.read_parquet(PARQUET_PATH)
+                combined = pd.concat([existing, df], ignore_index=True)
+                combined.to_parquet(PARQUET_PATH, index=False)
+            except Exception:
+                # if parquet reading/appending fails just write new file
+                df.to_parquet(PARQUET_PATH, index=False)
         else:
             df.to_parquet(PARQUET_PATH, index=False)
     except Exception:
-        # pandas not installed or write failed - that's ok, we have JSONL
         LOG.debug("pandas not available or parquet write failed; continuing with JSONL")
+
+    # ------------------------------
+    # ML replay buffer integration
+    # ------------------------------
+    # Behavior:
+    # 1) If metadata contains 'replay_id' (or variants), update that replay entry's reward.
+    # 2) Else: append a new replay row so training gets this sample immediately.
+    try:
+        ReplayBufferSQLite = None
+        try:
+            # prefer project-local class if available
+            from src.ml_pipeline import ReplayBufferSQLite  # type: ignore
+        except Exception:
+            try:
+                # fallback bare import
+                from ml_pipeline import ReplayBufferSQLite  # type: ignore
+            except Exception:
+                ReplayBufferSQLite = None
+
+        replay_id = _parse_replay_id(metadata)
+
+        if ReplayBufferSQLite is not None:
+            try:
+                rb = ReplayBufferSQLite(path=str(ML_REPLAY_DB_PATH))
+                if replay_id:
+                    try:
+                        rb.update_reward(replay_id, float(realized_pnl), closed_at=int(_time.time()))
+                        LOG.info("Updated ML replay id=%s with reward=%.2f", replay_id, float(realized_pnl))
+                    except Exception:
+                        LOG.exception("Failed to update replay id=%s via ReplayBufferSQLite", replay_id)
+                else:
+                    # deterministic feature names -> ordered vector
+                    features = {
+                        "entry_credit": ic.get("entry_credit") if isinstance(ic, dict) else None,
+                        "width": ic.get("width") if isinstance(ic, dict) else None,
+                        "lot_size": ic.get("lot_size") if isinstance(ic, dict) else None,
+                        "short_put": ic.get("short_put") if isinstance(ic, dict) else None,
+                        "short_call": ic.get("short_call") if isinstance(ic, dict) else None,
+                    }
+                    names = list(features.keys())
+                    vector = [features[n] for n in names]
+                    try:
+                        new_id = rb.append(entry_snapshot or {}, ic or {}, {"vector": vector, "names": names}, reward=float(realized_pnl), closed_at=int(_time.time()), meta={"source": "live_record", "origin_trade_id": uid})
+                        LOG.info("Appended new ML replay id=%s from live trade record (pnl=%.2f)", new_id, float(realized_pnl))
+                    except Exception:
+                        LOG.exception("Failed to append new replay via ReplayBufferSQLite")
+            except Exception:
+                LOG.exception("ReplayBufferSQLite usage failed - falling back to direct sqlite insertion")
+                ReplayBufferSQLite = None  # fall through to sqlite fallback
+
+        # fallback: write directly into ml_replay.db if ReplayBufferSQLite unavailable
+        if ReplayBufferSQLite is None:
+            try:
+                conn = sqlite3.connect(str(ML_REPLAY_DB_PATH), timeout=10, check_same_thread=False)
+                _ensure_replays_table(conn)
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    INSERT INTO replays (ts, ic_json, entry_snapshot_json, exit_snapshot_json, realized_pnl, exit_reason, metadata_json, closed_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        datetime.utcnow().isoformat() + "Z",
+                        _safe_json(ic if isinstance(ic, dict) else (ic.as_dict() if hasattr(ic, "as_dict") else str(ic))),
+                        _safe_json(entry_snapshot or {}),
+                        _safe_json(exit_snapshot or {}),
+                        float(realized_pnl),
+                        str(exit_reason),
+                        _safe_json(metadata or {}),
+                        int(_time.time()),
+                    ),
+                )
+                conn.commit()
+                inserted_id = cur.lastrowid
+                conn.close()
+                LOG.info("Inserted fallback ML replay id=%s from live trade (pnl=%.2f)", inserted_id, float(realized_pnl))
+            except Exception:
+                LOG.exception("Direct sqlite fallback into ml_replay.db failed (non-fatal)")
+
+    except Exception:
+        LOG.exception("ML replay buffer integration failed (non-fatal)")
 
     LOG.info("Recorded live trade %s realized_pnl=%.2f reason=%s", uid, realized_pnl, exit_reason)
     return record
